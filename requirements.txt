@@ -2,3 +2,7 @@ discord.py
 python-dotenv
 flask
 aioconsole
+prettytable
+colorthief
+pillow
+aiohttp

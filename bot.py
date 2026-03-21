@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 import keep_alive
 
 load_dotenv()
-TOKEN = "MTQ4NDgzMjQ1MDY1NTAyNzMxMA.GlWF2i.yy3MEXHKcb0nt1ofdCwuxxfaFrXLtUg5ocXNeU"
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 if TOKEN is None:
     print("Error: DISCORD_TOKEN not found in .env file.")
@@ -150,7 +150,9 @@ async def on_message(message):
                 'user_name': message.author.name,
                 'duration': 900,  # Default 15 minutes
                 'last_notified_song': getattr(spotify_activity, 'track_id', None) if spotify_activity else None,
-                'song_history': [initial_track] if initial_track else []
+                'song_history': [initial_track] if initial_track else [],
+                'skip_buffer': [],
+                'notif_task': None
             }
             
             # 2. Update persistent history
@@ -231,16 +233,6 @@ async def on_presence_update(before, after):
                 else:
                     artist_str = artists_list[0]
 
-                # Use bot.get_channel to handle both DMs and Guild channels
-                channel = bot.get_channel(channel_id)
-                if not channel and hasattr(after, 'guild') and after.guild:
-                    channel = after.guild.get_channel(channel_id)
-
-                if channel:
-                    await channel.send(
-                        f"🎶 **{after.display_name}** is now listening to **{after_spotify.title}** by **{artist_str}**"
-                    )
-                
                 # Update song histories (active and persistent)
                 new_track = f"**{after_spotify.title}** by {artist_str}"
                 
@@ -255,6 +247,43 @@ async def on_presence_update(before, after):
                 if not persist_history or persist_history[0] != new_track:
                     persist_history.insert(0, new_track)
                     user_history[user_id] = persist_history[:5]
+
+                # --- Skip Detection and Delayed Notification ---
+                async def send_notification(uid, track_info, artist):
+                    await asyncio.sleep(2.5)  # Wait for more skips
+                    session = tracked_users.get(uid)
+                    if not session: return
+                    
+                    buffer = session.get('skip_buffer', [])
+                    chan_id = session['channel_id']
+                    channel = bot.get_channel(chan_id)
+                    
+                    if not channel: return
+
+                    if len(buffer) >= 3:
+                        # Summary message for multiple skips
+                        last_track = buffer[-1]
+                        await channel.send(
+                            f"⏩ **{after.display_name}** skipped **{len(buffer)-1}** songs. Currently playing: {last_track}"
+                        )
+                    else:
+                        # Normal message for single/double change
+                        await channel.send(
+                            f"🎶 **{after.display_name}** is now listening to **{track_info}** by **{artist}**"
+                        )
+                    
+                    # Clear buffer and task
+                    session['skip_buffer'] = []
+                    session['notif_task'] = None
+
+                # Manage existing task and buffer
+                if data.get('notif_task'):
+                    data['notif_task'].cancel()
+                
+                if 'skip_buffer' not in data: data['skip_buffer'] = []
+                data['skip_buffer'].append(f"**{after_spotify.title}** by {artist_str}")
+                
+                data['notif_task'] = bot.loop.create_task(send_notification(user_id, after_spotify.title, artist_str))
 
 
 
@@ -351,7 +380,9 @@ async def trackme(ctx, minutes: int):
         'user_name': ctx.author.name,
         'duration': minutes * 60,
         'last_notified_song': getattr(spotify, 'track_id', spotify.title),
-        'song_history': history[:5]
+        'song_history': history[:5],
+        'skip_buffer': [],
+        'notif_task': None
     }
     
     # Update persistent history

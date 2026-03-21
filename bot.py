@@ -4,11 +4,10 @@ import asyncio
 import time
 import os
 from dotenv import load_dotenv
-from keep_alive import keep_alive
+import keep_alive
 
 load_dotenv()
-keep_alive()
-TOKEN = os.getenv('DISCORD_TOKEN')
+TOKEN = "MTQ4NDgzMjQ1MDY1NTAyNzMxMA.GlWF2i.yy3MEXHKcb0nt1ofdCwuxxfaFrXLtUg5ocXNeU"
 
 if TOKEN is None:
     print("Error: DISCORD_TOKEN not found in .env file.")
@@ -173,5 +172,5 @@ async def tracklist(ctx):
 
     await ctx.send(embed=embed)
 
-
+keep_alive.keep_alive()
 bot.run(TOKEN)

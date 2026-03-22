@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+from discord import ui
 import asyncio
 # import aioconsole
 import time
@@ -64,10 +65,12 @@ user_settings = {}
 def save_json():
     """Fallback to save dictionaries to a local JSON file."""
     try:
+        # Create snapshots to avoid RuntimeError: dictionary changed size during iteration
+        # when running in a separate thread.
         data = {
-            "user_history": {str(k): v for k, v in user_history.items()},
-            "user_artist_counts": {str(k): v for k, v in user_artist_counts.items()},
-            "user_settings": {str(k): v for k, v in user_settings.items()}
+            "user_history": {str(k): v for k, v in list(user_history.items())},
+            "user_artist_counts": {str(k): v for k, v in list(user_artist_counts.items())},
+            "user_settings": {str(k): v for k, v in list(user_settings.items())}
         }
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
@@ -76,10 +79,10 @@ def save_json():
 
 async def save_persistent_data(user_id=None):
     """Saves user stats and settings. If user_id is provided, saves specifically to MongoDB."""
-    # Always save local JSON as fallback
-    save_json()
+    # Always save local JSON as fallback in a separate thread to avoid blocking the event loop
+    await asyncio.to_thread(save_json)
 
-    if collection and user_id:
+    if collection is not None and user_id:
         try:
             # Save specific user data to MongoDB
             data = {
@@ -96,7 +99,7 @@ async def load_persistent_data():
     global user_history, user_artist_counts, user_settings
     
     # 1. Try loading from MongoDB first
-    if collection:
+    if collection is not None:
         try:
             cursor = collection.find({})
             async for document in cursor:
@@ -151,7 +154,8 @@ async def get_spotify_color(url: str):
                 with BytesIO(data) as f:
                     color_thief = ColorThief(f)
                     # quality=1 is slowest but most accurate, quality=10 is faster
-                    dominant_color = color_thief.get_color(quality=10)
+                    # Run in a thread to avoid blocking the event loop
+                    dominant_color = await asyncio.to_thread(color_thief.get_color, quality=10)
                     discord_color = discord.Color.from_rgb(*dominant_color)
                     album_color_cache[url] = discord_color
                     return discord_color
@@ -205,11 +209,52 @@ async def get_presence_channel(guild, fallback_channel_id):
             
     if guild:
         # If we reached here, no valid #spotify-updates were found or accessible
-        has_named_channel = any(c.name.lower().strip() == "spotify-updates" for c in guild.text_channels)
+        has_named_channel = any(c.name.lower().strip() == "spotify-updates" for c in guild.text_channels) if guild.text_channels else False
         if not has_named_channel:
              print(f" >>> [DEBUG]: No text channel named 'spotify-updates' found in server '{guild.name}'.")
     
     return fallback_channel
+
+
+async def start_tracking_session(member, channel, duration, ctx_guild=None):
+    """Internal helper to initialize tracking for a user across multiple commands."""
+    user_id = member.id
+    guild = ctx_guild or (member.guild if hasattr(member, 'guild') else None)
+    
+    # 1. Find the Spotify activity
+    spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
+    if not spotify:
+        return False
+        
+    # 2. Get target channel (fallback to provided channel or #spotify-updates)
+    target_channel = await get_presence_channel(guild, channel.id)
+    chan_id = target_channel.id if target_channel else channel.id
+    
+    # 3. Prepare initial session data
+    artist_str = format_artists(getattr(spotify, 'artists', []))
+    current_track = f"**{getattr(spotify, 'title', 'Unknown')}** by {artist_str}"
+    
+    tracked_users[user_id] = {
+        'start_time': time.time(),
+        'channel_id': chan_id,
+        'user_name': member.name,
+        'duration': duration,
+        'last_notified_song': getattr(spotify, 'track_id', getattr(spotify, 'title', None)),
+        'song_history': [current_track],
+        'skip_buffer': [],
+        'notif_task': None,
+        'last_stop_time': None
+    }
+    
+    # 4. Update persistent history & stats
+    persist_history = user_history.get(user_id, [])
+    if not persist_history or persist_history[0] != current_track:
+        persist_history.insert(0, current_track)
+        user_history[user_id] = persist_history[:5]
+        await update_artist_stats(user_id, getattr(spotify, 'artists', []))
+        
+    return True
+
 
 
 async def create_spotify_embed(member, spotify, title_text=None, color=None):
@@ -642,6 +687,7 @@ async def on_presence_update(before, after):
 
 @bot.hybrid_command(name="tracklist", description="Display everyone currently being tracked for their Spotify music status")
 async def tracklist(ctx):
+    await ctx.defer()
 
     if not tracked_users:
         await ctx.send("🔍 The tracking list is currently empty.")
@@ -683,6 +729,7 @@ async def tracklist(ctx):
 @bot.hybrid_command(name="trackme", description="Start tracking your Spotify activity for a specified number of minutes")
 async def trackme(ctx, minutes: int):
     """Adds you to the tracking list for a specified number of minutes."""
+    await ctx.defer()
     user_id = ctx.author.id
     
     # Check if user is currently listening to Spotify
@@ -756,6 +803,7 @@ async def trackme(ctx, minutes: int):
 @bot.hybrid_command(name="ping", description="Check the bot's latency")
 async def ping(ctx):
     """Responds with the bot's current latency."""
+    await ctx.defer()
     latency = round(bot.latency * 1000)
     await ctx.send(f"🏓 **Pong!** Bot latency: **{latency}ms**")
 
@@ -769,6 +817,7 @@ async def trackme_error(ctx, error):
 @bot.hybrid_command(name="stoptrack", description="Stop tracking your Spotify activity")
 async def stoptrack(ctx):
     """Removes you from the tracking list."""
+    await ctx.defer()
     user_id = ctx.author.id
     if user_id in tracked_users:
         del tracked_users[user_id]
@@ -784,6 +833,7 @@ async def stoptrack(ctx):
 @bot.hybrid_command(name="history", description="Show the last 5 songs recorded during your tracking sessions")
 async def history(ctx):
     """Displays the persistent song history of a user."""
+    await ctx.defer()
     user_id = ctx.author.id
     history_list = user_history.get(user_id, [])
     
@@ -807,6 +857,7 @@ async def history(ctx):
 @bot.hybrid_command(name="topartists", description="Show your most listened to artists recorded during tracking sessions")
 async def topartists(ctx, member: discord.Member = None):
     """Displays the most listened to artists for a user."""
+    await ctx.defer()
     target_member = member or ctx.author
     user_id = target_member.id
     
@@ -847,70 +898,103 @@ async def topartists(ctx, member: discord.Member = None):
     await ctx.send(embed=embed)
 
 
+class AutoTrackView(ui.View):
+    def __init__(self, ctx):
+        super().__init__(timeout=60)
+        self.ctx = ctx
+        self.value = None
+
+    @ui.button(label="Enable Auto-Track", style=discord.ButtonStyle.green, emoji="✅")
+    async def enable(self, interaction: discord.Interaction, button: ui.Button):
+        if interaction.user.id != self.ctx.author.id:
+            await interaction.response.send_message("❌ This menu is not for you.", ephemeral=True)
+            return
+        self.value = True
+        self.stop()
+        await interaction.response.defer()
+
+    @ui.button(label="Disable Auto-Track", style=discord.ButtonStyle.red, emoji="❌")
+    async def disable(self, interaction: discord.Interaction, button: ui.Button):
+        if interaction.user.id != self.ctx.author.id:
+            await interaction.response.send_message("❌ This menu is not for you.", ephemeral=True)
+            return
+        self.value = False
+        self.stop()
+        await interaction.response.defer()
+
+
 @bot.hybrid_command(name="autotrack", description="Toggle whether the bot automatically tracks you when you start listening to Spotify")
 async def autotrack(ctx):
-    """Toggles the auto-track setting for the user."""
+    """Two-step process to toggle the auto-track setting for the user."""
+    await ctx.defer()
     user_id = ctx.author.id
+    
     if user_id not in user_settings:
         user_settings[user_id] = {}
     
     current = user_settings[user_id].get('auto_track', False)
-    new_status = not current
+    status_emoji = "✅" if current else "❌"
+    status_text = "Enabled" if current else "Disabled"
+    
+    embed = discord.Embed(
+        title="🎵 Auto-Track Configuration",
+        description=(
+            "**Auto-Track** automatically starts a 1-hour tracking session whenever you begin listening to music on Spotify. "
+            "You won't have to manually use `/trackme` ever again!\n\n"
+            "By enabling this, updates will be posted to the **#spotify-updates** channel (if it exists) or the original tracking channel.\n\n"
+            f"**Current Setting:** `{status_text} {status_emoji}`\n\n"
+            "What would you like to do?"
+        ),
+        color=discord.Color.blue()
+    )
+    
+    view = AutoTrackView(ctx)
+    message = await ctx.send(embed=embed, view=view)
+    
+    await view.wait()
+    
+    if view.value is None:
+        await message.edit(content="⌛ Request timed out.", view=None)
+        return
+
+    new_status = view.value
     user_settings[user_id]['auto_track'] = new_status
     
-    # Store the channel where they ran the command as the default for auto-tracking
     if new_status:
         user_settings[user_id]['auto_track_channel'] = ctx.channel.id
         status_text = "enabled"
         
-        # Check if they are currently listening and start tracking immediately
-        member = ctx.author
-        if ctx.guild:
-            member = ctx.guild.get_member(ctx.author.id) or ctx.author
-            
-        spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
-        if spotify and user_id not in tracked_users:
-            # We initialize tracking right now so they appear in %tracklist and record history
-            target_channel = await get_presence_channel(ctx.guild, ctx.channel.id)
-            chan_id = target_channel.id if target_channel else ctx.channel.id
-            
-            artist_str = format_artists(getattr(spotify, 'artists', []))
-            current_track = f"**{getattr(spotify, 'title', 'Unknown')}** by {artist_str}"
-            
-            tracked_users[user_id] = {
-                'start_time': time.time(),
-                'channel_id': chan_id,
-                'user_name': ctx.author.name,
-                'duration': 3600,  # 1 hour default for auto-track
-                'last_notified_song': getattr(spotify, 'track_id', getattr(spotify, 'title', None)),
-                'song_history': [current_track],
-                'skip_buffer': [],
-                'notif_task': None,
-                'last_stop_time': None
-            }
-            
-            # Update persistent history
-            persist_history = user_history.get(user_id, [])
-            if not persist_history or persist_history[0] != current_track:
-                persist_history.insert(0, current_track)
-                user_history[user_id] = persist_history[:5]
-                await update_artist_stats(user_id, getattr(spotify, 'artists', []))
-
-        # Check if #spotify-updates exists in this guild
+        # Start tracking immediately if already listening
+        member = ctx.guild.get_member(user_id) if ctx.guild else ctx.author
+        started = await start_tracking_session(member, ctx.channel, 3600, ctx_guild=ctx.guild)
+        
+        # Check for #spotify-updates for the message description
         has_named_channel = any(c.name.lower().strip() == "spotify-updates" for c in ctx.guild.text_channels) if ctx.guild else False
         
-        if has_named_channel:
-             desc = (
-                f"✅ **Auto-tracking {status_text}!**\n\n"
-                "From now on, I'll automatically start tracking your Spotify activity whenever you start listening. "
-                "I'll post updates in **#spotify-updates** in this server."
-            )
-        else:
-            desc = (
-                f"✅ **Auto-tracking {status_text}!**\n\n"
-                "From now on, I'll automatically start tracking your Spotify activity whenever you start listening. "
-                "I'll post updates in this channel."
-            )
+        target_loc = "**#spotify-updates**" if has_named_channel else "this channel"
+        extra = ""
+        
+        if started:
+            extra = "\n\nI've also started tracking your current music right now! Check the updates channel. 🎶"
+            
+            # Send the initial "Currently Playing" embed in the tracking channel
+            data = tracked_users[user_id]
+            target_channel = bot.get_channel(data['channel_id'])
+            if target_channel:
+                spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
+                artist_str = format_artists(getattr(spotify, 'artists', []))
+                song_title = spotify.title if hasattr(spotify, 'title') else "a song"
+                notif_desc = f"Now tracking **{member.display_name}**'s playlist.\nCurrently listening to **{song_title}** by **{artist_str}**"
+                
+                embed_msg = await create_spotify_embed(member, spotify, title_text=notif_desc)
+                embed_msg.title = f"🎵 Spotify Activity Detected: {embed_msg.title}" if embed_msg.title else "🎵 Spotify Activity Detected"
+                await target_channel.send(embed=embed_msg)
+        
+        desc = (
+            f"✅ **Auto-tracking {status_text}!**\n\n"
+            f"From now on, I'll automatically start tracking your Spotify activity whenever you start listening. "
+            f"I'll post updates in {target_loc}.{extra}"
+        )
         color = discord.Color.green()
     else:
         status_text = "disabled"
@@ -918,13 +1002,15 @@ async def autotrack(ctx):
         color = discord.Color.red()
 
     await save_persistent_data(user_id)
-    embed = discord.Embed(description=desc, color=color)
-    await ctx.send(embed=embed)
+    success_embed = discord.Embed(description=desc, color=color)
+    await message.edit(embed=success_embed, view=None)
+
 
 
 @bot.hybrid_command(name="song", description="Show what a user is currently listening to on Spotify")
 async def song(ctx, member: discord.Member = None):
     """Displays the current Spotify activity of a user."""
+    await ctx.defer()
     # Use the provided member or default to ctx.author
     target_member = member or ctx.author
     

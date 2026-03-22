@@ -6,3 +6,5 @@ prettytable
 colorthief
 pillow
 aiohttp
+motor
+dnspython

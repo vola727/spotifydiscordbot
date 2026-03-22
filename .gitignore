@@ -39,3 +39,4 @@ env/
 
 # Project specific
 *.log
+persistent_data.json

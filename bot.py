@@ -11,6 +11,7 @@ from prettytable import PrettyTable
 import aiohttp
 from io import BytesIO
 from colorthief import ColorThief
+import json
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -33,11 +34,49 @@ bot = commands.Bot(command_prefix="%", intents=intents)
 # 
 # state = ConsoleState()
 
+# Files for persistence
+DATA_FILE = "persistent_data.json"
+
 # Dictionary to store users being tracked: {user_id: {start_time, channel_id, user_name, duration, song_history}}
 tracked_users = {}
 
-# Persistent dictionary for song history: {user_id: [songs]}
+# Initial empty dictionaries
 user_history = {}
+user_artist_counts = {}
+user_settings = {}
+
+def save_persistent_data():
+    """Saves user stats and settings to a JSON file."""
+    try:
+        data = {
+            "user_history": {str(k): v for k, v in user_history.items()},
+            "user_artist_counts": {str(k): v for k, v in user_artist_counts.items()},
+            "user_settings": {str(k): v for k, v in user_settings.items()}
+        }
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f" >>> [DEBUG]: Error saving persistent data: {e}")
+
+def load_persistent_data():
+    """Loads user stats and settings from a JSON file."""
+    global user_history, user_artist_counts, user_settings
+    if not os.path.exists(DATA_FILE):
+        return
+
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            # JSON keys are always strings, convert them back to integers (User IDs)
+            user_history = {int(k): v for k, v in data.get("user_history", {}).items()}
+            user_artist_counts = {int(k): v for k, v in data.get("user_artist_counts", {}).items()}
+            user_settings = {int(k): v for k, v in data.get("user_settings", {}).items()}
+            print(f" >>> [SYSTEM]: Loaded persistent data for {len(user_history)} users.")
+    except Exception as e:
+        print(f" >>> [DEBUG]: Error loading persistent data: {e}")
+
+# Load data at startup
+load_persistent_data()
 
 # Cache for album cover colors: {album_cover_url: discord.Color}
 album_color_cache = {}
@@ -75,6 +114,28 @@ async def get_spotify_color(url: str):
         print(f" >>> [DEBUG]: Error extracting color from {url}: {e}")
     
     return discord.Color.green()
+
+
+def update_artist_stats(user_id, artists):
+    """Increments the play count for each artist for a specific user."""
+    if user_id not in user_artist_counts:
+        user_artist_counts[user_id] = {}
+    
+    for artist in artists:
+        user_artist_counts[user_id][artist] = user_artist_counts[user_id].get(artist, 0) + 1
+    
+    # Save after updates
+    save_persistent_data()
+
+
+def format_artists(artists_list):
+    """Formats a list of artists into a readable string (Consistently)."""
+    if not artists_list:
+        return "Unknown Artist"
+    elif len(artists_list) > 1:
+        return ", ".join(artists_list[:-1]) + " and " + artists_list[-1]
+    else:
+        return artists_list[0]
 
 
 async def get_presence_channel(guild, fallback_channel_id):
@@ -304,7 +365,8 @@ async def on_message(message):
         # 1. Prepare history and initial data
         initial_track = None
         if spotify_activity:
-            initial_track = f"**{spotify_activity.title}** by {', '.join(spotify_activity.artists)}"
+            artist_str = format_artists(getattr(spotify_activity, 'artists', []))
+            initial_track = f"**{spotify_activity.title}** by {artist_str}"
             
             # 1. Update active tracking
             tracked_users[user_id] = {
@@ -325,19 +387,14 @@ async def on_message(message):
                 if not existing or existing[0] != initial_track:
                     existing.insert(0, initial_track)
                     user_history[user_id] = existing[:5]
+                    update_artist_stats(user_id, getattr(spotify_activity, 'artists', []))
         
         # 3. Prepare the artist and song info
         artist_str = "Unknown Artist"
         song_title = "a song"
         if spotify_activity:
             song_title = spotify_activity.title
-            artists_list = spotify_activity.artists
-            if not artists_list:
-                artist_str = "Unknown Artist"
-            elif len(artists_list) > 1:
-                artist_str = ", ".join(artists_list[:-1]) + " and " + artists_list[-1]
-            else:
-                artist_str = artists_list[0]
+            artist_str = format_artists(getattr(spotify_activity, 'artists', []))
         
         # 3. Send the appropriate message
         target_channel = await get_presence_channel(message.guild, message.channel.id)
@@ -372,7 +429,11 @@ async def on_message(message):
 async def on_presence_update(before, after):
     user_id = after.id
     
-    # Check if user is in our 15-minute tracking window
+    # Check if the activity change involves Spotify (Detect at the top for both branches)
+    before_spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', before.activities)
+    after_spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', after.activities)
+
+    # 1. Handle Already Tracked Users
     if user_id in tracked_users:
         data = tracked_users[user_id]
         start_time = data['start_time']
@@ -391,10 +452,6 @@ async def on_presence_update(before, after):
         if time.time() - start_time > duration:
             del tracked_users[user_id]
             return
-
-        # Check if the activity change involves Spotify
-        before_spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', before.activities)
-        after_spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', after.activities)
 
         # 1. Detect when Spotify activity stops
         if before_spotify and not after_spotify:
@@ -423,13 +480,7 @@ async def on_presence_update(before, after):
                 tracked_users[user_id]['last_notified_song'] = track_id
                 
                 # Cleanly join artist names
-                artists_list = after_spotify.artists
-                if not artists_list:
-                    artist_str = "Unknown Artist"
-                elif len(artists_list) > 1:
-                    artist_str = ", ".join(artists_list[:-1]) + " and " + artists_list[-1]
-                else:
-                    artist_str = artists_list[0]
+                artist_str = format_artists(getattr(after_spotify, 'artists', []))
 
                 # Update song histories (active and persistent)
                 new_track = f"**{after_spotify.title}** by {artist_str}"
@@ -445,6 +496,7 @@ async def on_presence_update(before, after):
                 if not persist_history or persist_history[0] != new_track:
                     persist_history.insert(0, new_track)
                     user_history[user_id] = persist_history[:5]
+                    update_artist_stats(user_id, getattr(after_spotify, 'artists', []))
 
                 # --- Skip Detection and Delayed Notification ---
                 async def send_notification(uid, guild_id, chan_id):
@@ -498,7 +550,41 @@ async def on_presence_update(before, after):
                 # Start/Restart the 2-second stability timer
                 data['notif_task'] = bot.loop.create_task(send_notification(user_id, after.guild.id, channel_id))
 
-
+    # 2. Handle Auto-Track Initialization for non-tracked users
+    else:
+        settings = user_settings.get(user_id, {})
+        if settings.get('auto_track') and not before_spotify and after_spotify:
+            channel_id = settings.get('auto_track_channel')
+            if channel_id:
+                # IMPORTANT: Only initialize in the guild where the auto_track_channel exists
+                # This prevents duplicate sessions if the user is in multiple guilds with the bot
+                target_channel = await get_presence_channel(after.guild, channel_id)
+                
+                # Check if target_channel belongs to 'after.guild'
+                if target_channel and hasattr(target_channel, 'guild') and target_channel.guild.id == after.guild.id:
+                    # Prepare initial data
+                    artist_str = format_artists(getattr(after_spotify, 'artists', []))
+                    current_track = f"**{after_spotify.title}** by {artist_str}"
+                    
+                    # Initialize tracking
+                    tracked_users[user_id] = {
+                        'start_time': time.time(),
+                        'channel_id': channel_id,
+                        'user_name': after.name,
+                        'duration': 3600,  # Default 1 hour for auto-track
+                        'last_notified_song': getattr(after_spotify, 'track_id', after_spotify.title),
+                        'song_history': [current_track],
+                        'skip_buffer': [],
+                        'notif_task': None,
+                        'last_stop_time': None
+                    }
+                    
+                    # Update persistent history & artist stats
+                    persist_history = user_history.get(user_id, [])
+                    if not persist_history or persist_history[0] != current_track:
+                        persist_history.insert(0, current_track)
+                        user_history[user_id] = persist_history[:5]
+                        update_artist_stats(user_id, getattr(after_spotify, 'artists', []))
 
 @bot.hybrid_command(name="tracklist", description="Display everyone currently being tracked for their Spotify music status")
 async def tracklist(ctx):
@@ -568,13 +654,7 @@ async def trackme(ctx, minutes: int):
     
     # Prepare song info
     song_title = getattr(spotify, 'title', 'Unknown Song')
-    artists_list = getattr(spotify, 'artists', [])
-    if not artists_list:
-        artist_str = "Unknown Artist"
-    elif len(artists_list) > 1:
-        artist_str = ", ".join(artists_list[:-1]) + " and " + artists_list[-1]
-    else:
-        artist_str = artists_list[0]
+    artist_str = format_artists(getattr(spotify, 'artists', []))
     
     current_track = f"**{song_title}** by {artist_str}"
     
@@ -604,6 +684,7 @@ async def trackme(ctx, minutes: int):
     if not persist_history or persist_history[0] != current_track:
         persist_history.insert(0, current_track)
         user_history[user_id] = persist_history[:5]
+        update_artist_stats(user_id, getattr(spotify, 'artists', []))
 
     if was_already_tracked:
         title = "✅ Tracking Updated!"
@@ -666,6 +747,90 @@ async def history(ctx):
 
     status = "Active" if user_id in tracked_users else "Ended"
     embed.set_footer(text=f"Last session status: {status}")
+    await ctx.send(embed=embed)
+
+
+@bot.hybrid_command(name="topartists", description="Show your most listened to artists recorded during tracking sessions")
+async def topartists(ctx, member: discord.Member = None):
+    """Displays the most listened to artists for a user."""
+    target_member = member or ctx.author
+    user_id = target_member.id
+    
+    artist_data = user_artist_counts.get(user_id, {})
+    
+    if not artist_data:
+        await ctx.send(
+            f"❌ **Error:** No artist data found for {target_member.display_name}. "
+            f"Use `/trackme` to start recording your listening stats!"
+        )
+        return
+
+    # Sort artists by count descending
+    sorted_artists = sorted(artist_data.items(), key=lambda item: item[1], reverse=True)
+    
+    # Take top 10
+    top_artists = sorted_artists[:10]
+    
+    description = ""
+    for i, (artist, count) in enumerate(top_artists, 1):
+        # Using a sleek format for the list
+        plays_word = "play" if count == 1 else "plays"
+        description += f"**{i}.** {artist} — `{count} {plays_word}`\n"
+
+    embed = discord.Embed(
+        title=f"🔝 Top Artists for {target_member.display_name}",
+        color=discord.Color.purple(),  # Vibrant purple for stats
+        description=description,
+        timestamp=datetime.datetime.now(datetime.timezone.utc)
+    )
+    
+    if target_member.display_avatar:
+        embed.set_thumbnail(url=target_member.display_avatar.url)
+    
+    total_plays = sum(artist_data.values())
+    embed.set_footer(text=f"Total recorded artist plays: {total_plays}")
+    
+    await ctx.send(embed=embed)
+
+
+@bot.hybrid_command(name="autotrack", description="Toggle whether the bot automatically tracks you when you start listening to Spotify")
+async def autotrack(ctx):
+    """Toggles the auto-track setting for the user."""
+    user_id = ctx.author.id
+    if user_id not in user_settings:
+        user_settings[user_id] = {}
+    
+    current = user_settings[user_id].get('auto_track', False)
+    new_status = not current
+    user_settings[user_id]['auto_track'] = new_status
+    
+    # Store the channel where they ran the command as the default for auto-tracking
+    if new_status:
+        user_settings[user_id]['auto_track_channel'] = ctx.channel.id
+        status_text = "enabled"
+        # Check if #spotify-updates exists in this guild
+        has_named_channel = any(c.name.lower().strip() == "spotify-updates" for c in ctx.guild.text_channels) if ctx.guild else False
+        
+        if has_named_channel:
+             desc = (
+                f"✅ **Auto-tracking {status_text}!**\n\n"
+                "From now on, I'll automatically start tracking your Spotify activity whenever you start listening. "
+                "I'll post updates in **#spotify-updates** in this server."
+            )
+        else:
+            desc = (
+                f"✅ **Auto-tracking {status_text}!**\n\n"
+                "From now on, I'll automatically start tracking your Spotify activity whenever you start listening. "
+                "I'll post updates in this channel."
+            )
+        color = discord.Color.green()
+    else:
+        status_text = "disabled"
+        desc = f"❌ **Auto-tracking {status_text}.**"
+        color = discord.Color.red()
+
+    save_persistent_data()
+    embed = discord.Embed(description=desc, color=color)
     await ctx.send(embed=embed)
 
 

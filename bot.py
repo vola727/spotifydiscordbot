@@ -553,7 +553,7 @@ async def on_presence_update(before, after):
     # 2. Handle Auto-Track Initialization for non-tracked users
     else:
         settings = user_settings.get(user_id, {})
-        if settings.get('auto_track') and not before_spotify and after_spotify:
+        if settings.get('auto_track') and after_spotify:
             channel_id = settings.get('auto_track_channel')
             if channel_id:
                 # IMPORTANT: Only initialize in the guild where the auto_track_channel exists
@@ -808,6 +808,40 @@ async def autotrack(ctx):
     if new_status:
         user_settings[user_id]['auto_track_channel'] = ctx.channel.id
         status_text = "enabled"
+        
+        # Check if they are currently listening and start tracking immediately
+        member = ctx.author
+        if ctx.guild:
+            member = ctx.guild.get_member(ctx.author.id) or ctx.author
+            
+        spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
+        if spotify and user_id not in tracked_users:
+            # We initialize tracking right now so they appear in %tracklist and record history
+            target_channel = await get_presence_channel(ctx.guild, ctx.channel.id)
+            chan_id = target_channel.id if target_channel else ctx.channel.id
+            
+            artist_str = format_artists(getattr(spotify, 'artists', []))
+            current_track = f"**{getattr(spotify, 'title', 'Unknown')}** by {artist_str}"
+            
+            tracked_users[user_id] = {
+                'start_time': time.time(),
+                'channel_id': chan_id,
+                'user_name': ctx.author.name,
+                'duration': 3600,  # 1 hour default for auto-track
+                'last_notified_song': getattr(spotify, 'track_id', getattr(spotify, 'title', None)),
+                'song_history': [current_track],
+                'skip_buffer': [],
+                'notif_task': None,
+                'last_stop_time': None
+            }
+            
+            # Update persistent history
+            persist_history = user_history.get(user_id, [])
+            if not persist_history or persist_history[0] != current_track:
+                persist_history.insert(0, current_track)
+                user_history[user_id] = persist_history[:5]
+                update_artist_stats(user_id, getattr(spotify, 'artists', []))
+
         # Check if #spotify-updates exists in this guild
         has_named_channel = any(c.name.lower().strip() == "spotify-updates" for c in ctx.guild.text_channels) if ctx.guild else False
         

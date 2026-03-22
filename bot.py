@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 import asyncio
-import aioconsole
+# import aioconsole
 import time
 import os
 import datetime
@@ -27,11 +27,11 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="%", intents=intents)
 
-class ConsoleState:
-    active_target_id = None
-    receivemessages = True
-
-state = ConsoleState()
+# class ConsoleState:
+#     active_target_id = None
+#     receivemessages = True
+# 
+# state = ConsoleState()
 
 # Dictionary to store users being tracked: {user_id: {start_time, channel_id, user_name, duration, song_history}}
 tracked_users = {}
@@ -147,124 +147,124 @@ async def create_spotify_embed(member, spotify, title_text=None, color=None):
     return embed
 
 
-async def manual_control():
-    await bot.wait_until_ready()
-    print(f'Logged in as {bot.user.name}')
-    print("--- Console Controller Active ---")
-    print("Commands: /target [ID] | /clear | /exit | /stopresponses | /startresponses | /showdetails")
-    
-    while not bot.is_closed():
-        user_input = await aioconsole.ainput("") # Clean prompt for better chat flow
-
-        if not user_input.strip():
-            continue
-
-        # 1. Handle Commands
-        if user_input.startswith("/target "):
-            try:
-                new_id = int(user_input.replace("/target ", "").strip())
-                target = bot.get_channel(new_id) or bot.get_user(new_id)
-                if target:
-                    state.active_target_id = new_id
-                    print(f" >>> [SYSTEM]: Now chatting with: {target}")
-                else:
-                    print(" >>> [SYSTEM]: Error: ID not found.")
-            except ValueError:
-                print(" >>> [SYSTEM]: Error: Invalid ID format.")
-            continue
-
-        if user_input.lower() == "/clear":
-            state.active_target_id = None
-            print(" >>> [SYSTEM]: Target cleared. You are now 'lurking'.")
-            continue
-
-        if user_input.lower() == "/exit":
-            print("Closing...")
-            global _session
-            if _session:
-                await _session.close()
-            await bot.close()
-            break
-        
-        if user_input.lower() == "/stopresponses":
-            print(" >>> [SYSTEM]: Stopping all responses. You will no longer receive messages from the active target.")
-            state.receivemessages = False
-            continue
-        
-        if user_input.lower() == "/startresponses":
-            print(" >>> [SYSTEM]: Resuming responses. You will now receive messages from the active target.")
-            state.receivemessages = True
-            continue
-
-        if user_input.lower() == "/showdetails":
-            if not tracked_users:
-                print(" >>> [SYSTEM]: No users are currently being tracked.")
-                continue
-
-            table = PrettyTable()
-            table.field_names = [
-                "User ID", "Username", "Channel", "Start Time", 
-                "Total (min)", "Left (min/sec)", "Track ID", 
-                "History", "Skips", "Last Paused"
-            ]
-            
-            for uid, data in tracked_users.items():
-                elapsed = time.time() - data['start_time']
-                
-                # Format time left (respecting user's recent float logic for the column name but making it readable)
-                time_left_raw = data['duration'] - elapsed
-                mins = int(max(0, time_left_raw // 60))
-                secs = int(max(0, time_left_raw % 60))
-                time_left_str = f"{mins}m {secs}s"
-                
-                # Format start time
-                start_dt = datetime.datetime.fromtimestamp(data['start_time'])
-                start_str = start_dt.strftime("%H:%M:%S")
-                
-                # Format last stop time (pause)
-                last_stop = data.get('last_stop_time')
-                stop_str = datetime.datetime.fromtimestamp(last_stop).strftime("%H:%M:%S") if last_stop else "---"
-                
-                # Get channel object for nice display
-                channel = bot.get_channel(data['channel_id'])
-                chan_name = f"#{channel.name}" if channel and hasattr(channel, 'name') else f"ID: {data['channel_id']}"
-                
-                history = data.get('song_history', [])
-                current = history[0].replace("**", "")[:25] + "..." if history else "---"
-                
-                table.add_row([
-                    uid, 
-                    data['user_name'], 
-                    chan_name, 
-                    start_str,
-                    int(data['duration'] / 60),
-                    time_left_str,
-                    data.get('last_notified_song', "---"),
-                    current,
-                    len(data.get('skip_buffer', [])),
-                    stop_str
-                ])
-            
-            print(table)
-            continue
-
-        # 2. Handle Sending
-        if state.active_target_id:
-            target = bot.get_channel(state.active_target_id) or bot.get_user(state.active_target_id)
-            if target:
-                try:
-                    await target.send(user_input)
-                except Exception as e:
-                    print(f" >>> [SYSTEM]: Failed to send: {e}")
-        else:
-            print(" >>> [SYSTEM]: No target set. Use /target [ID] to start chatting.")
+# async def manual_control():
+#     await bot.wait_until_ready()
+#     print(f'Logged in as {bot.user.name}')
+#     print("--- Console Controller Active ---")
+#     print("Commands: /target [ID] | /clear | /exit | /stopresponses | /startresponses | /showdetails")
+#     
+#     while not bot.is_closed():
+#         user_input = await aioconsole.ainput("") # Clean prompt for better chat flow
+# 
+#         if not user_input.strip():
+#             continue
+# 
+#         # 1. Handle Commands
+#         if user_input.startswith("/target "):
+#             try:
+#                 new_id = int(user_input.replace("/target ", "").strip())
+#                 target = bot.get_channel(new_id) or bot.get_user(new_id)
+#                 if target:
+#                     state.active_target_id = new_id
+#                     print(f" >>> [SYSTEM]: Now chatting with: {target}")
+#                 else:
+#                     print(" >>> [SYSTEM]: Error: ID not found.")
+#             except ValueError:
+#                 print(" >>> [SYSTEM]: Error: Invalid ID format.")
+#             continue
+# 
+#         if user_input.lower() == "/clear":
+#             state.active_target_id = None
+#             print(" >>> [SYSTEM]: Target cleared. You are now 'lurking'.")
+#             continue
+# 
+#         if user_input.lower() == "/exit":
+#             print("Closing...")
+#             global _session
+#             if _session:
+#                 await _session.close()
+#             await bot.close()
+#             break
+#         
+#         if user_input.lower() == "/stopresponses":
+#             print(" >>> [SYSTEM]: Stopping all responses. You will no longer receive messages from the active target.")
+#             state.receivemessages = False
+#             continue
+#         
+#         if user_input.lower() == "/startresponses":
+#             print(" >>> [SYSTEM]: Resuming responses. You will now receive messages from the active target.")
+#             state.receivemessages = True
+#             continue
+# 
+#         if user_input.lower() == "/showdetails":
+#             if not tracked_users:
+#                 print(" >>> [SYSTEM]: No users are currently being tracked.")
+#                 continue
+# 
+#             table = PrettyTable()
+#             table.field_names = [
+#                 "User ID", "Username", "Channel", "Start Time", 
+#                 "Total (min)", "Left (min/sec)", "Track ID", 
+#                 "History", "Skips", "Last Paused"
+#             ]
+#             
+#             for uid, data in tracked_users.items():
+#                 elapsed = time.time() - data['start_time']
+#                 
+#                 # Format time left (respecting user's recent float logic for the column name but making it readable)
+#                 time_left_raw = data['duration'] - elapsed
+#                 mins = int(max(0, time_left_raw // 60))
+#                 secs = int(max(0, time_left_raw % 60))
+#                 time_left_str = f"{mins}m {secs}s"
+#                 
+#                 # Format start time
+#                 start_dt = datetime.datetime.fromtimestamp(data['start_time'])
+#                 start_str = start_dt.strftime("%H:%M:%S")
+#                 
+#                 # Format last stop time (pause)
+#                 last_stop = data.get('last_stop_time')
+#                 stop_str = datetime.datetime.fromtimestamp(last_stop).strftime("%H:%M:%S") if last_stop else "---"
+#                 
+#                 # Get channel object for nice display
+#                 channel = bot.get_channel(data['channel_id'])
+#                 chan_name = f"#{channel.name}" if channel and hasattr(channel, 'name') else f"ID: {data['channel_id']}"
+#                 
+#                 history = data.get('song_history', [])
+#                 current = history[0].replace("**", "")[:25] + "..." if history else "---"
+#                 
+#                 table.add_row([
+#                     uid, 
+#                     data['user_name'], 
+#                     chan_name, 
+#                     start_str,
+#                     int(data['duration'] / 60),
+#                     time_left_str,
+#                     data.get('last_notified_song', "---"),
+#                     current,
+#                     len(data.get('skip_buffer', [])),
+#                     stop_str
+#                 ])
+#             
+#             print(table)
+#             continue
+# 
+#         # 2. Handle Sending
+#         if state.active_target_id:
+#             target = bot.get_channel(state.active_target_id) or bot.get_user(state.active_target_id)
+#             if target:
+#                 try:
+#                     await target.send(user_input)
+#                 except Exception as e:
+#                     print(f" >>> [SYSTEM]: Failed to send: {e}")
+#         else:
+#             print(" >>> [SYSTEM]: No target set. Use /target [ID] to start chatting.")
             
     
         
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user.name}')
-    bot.loop.create_task(manual_control())
+    # bot.loop.create_task(manual_control())
     try:
         # Syncing slash commands (can take a moment)
         synced = await bot.tree.sync()
@@ -356,10 +356,10 @@ async def on_message(message):
 
     # Check if the message is from our active target
     # This checks both the Channel ID (for servers) and Author ID (for DMs)
-    if state.active_target_id and state.receivemessages:
-        if message.channel.id == state.active_target_id or message.author.id == state.active_target_id:
-            location = f"DM" if isinstance(message.channel, discord.DMChannel) else f"#{message.channel.name}"
-            print(f"[{location}] {message.author}: {message.content}")
+    # if state.active_target_id and state.receivemessages:
+    #     if message.channel.id == state.active_target_id or message.author.id == state.active_target_id:
+    #         location = f"DM" if isinstance(message.channel, discord.DMChannel) else f"#{message.channel.name}"
+    #         print(f"[{location}] {message.author}: {message.content}")
 
 
     

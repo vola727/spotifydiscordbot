@@ -727,5 +727,5 @@ async def cleanse_error(ctx, error):
         await ctx.send("❌ **Error:** You need **Administrator** permissions to use this command.", ephemeral=True)
 
 
-# keep_alive.keep_alive()
+keep_alive.keep_alive()
 bot.run(TOKEN)

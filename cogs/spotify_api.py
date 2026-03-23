@@ -68,36 +68,103 @@ class SpotifyAPI(commands.Cog):
         try:
             await self.bot.wait_until_ready()
             
-            # Snapshot keys to avoid RuntimeError
-            user_ids = list(tracked_users.keys())
-            for user_id in user_ids:
-                if user_id not in tracked_users:
-                    continue
-                data = tracked_users[user_id]
+            # 1. Handle currently tracked users (Expiration and Polling)
+            tracked_ids = list(tracked_users.keys())
+            for user_id in tracked_ids:
+                data = tracked_users.get(user_id)
+                if not data: continue
                 
-                # Only poll if we have their token
-                if user_id not in spotify_tokens:
-                    continue
-                    
-                # Check if discord is already showing them playing Spotify
-                member = None
-                for guild in self.bot.guilds:
-                    member_in_guild = guild.get_member(user_id)
-                    if member_in_guild:
-                        member = member_in_guild
-                        break
-                        
-                if member:
-                    spotify_activity = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
-                    if spotify_activity:
-                        # They are online and Discord is picking it up. Skip polling.
+                # Check for expiration (Crucial for offline users!)
+                elapsed = time.time() - data.get('start_time', 0)
+                duration = data.get('duration', 900)
+                
+                if elapsed > duration:
+                    settings = user_settings.get(user_id, {})
+                    if settings.get('auto_track'):
+                        data['start_time'] = time.time()
+                        data['duration'] = 3600
+                    else:
+                        print(f" >>> [SYSTEM]: Tracking session expired for {data.get('user_name', user_id)} (API Cleanup)")
+                        del tracked_users[user_id]
                         continue
+
+                # Only poll if we have their token
+                if user_id in spotify_tokens:
+                    member = self._get_member(user_id)
+                    if member:
+                        spotify_activity = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
+                        if spotify_activity:
+                            # Discord presence is working, let Tracking cog handle it
+                            continue
+                    
+                    await self._poll_user_spotify(user_id, data, member)
+
+            # 2. Re-initialize Auto-Track for linked users who aren't in the list (Offline recovery)
+            linked_ids = list(spotify_tokens.keys())
+            for user_id in linked_ids:
+                if user_id in tracked_users: continue
                 
-                # They are either offline, or Discord isn't picking it up. Let's ask Spotify.
-                await self._poll_user_spotify(user_id, data, member)
+                settings = user_settings.get(user_id, {})
+                if settings.get('auto_track') and settings.get('auto_track_channel'):
+                    member = self._get_member(user_id)
+                    if member:
+                        activity = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
+                        if activity: continue
+                    
+                    # API check to see if we should start a session
+                    await self._check_autostart(user_id, member, settings.get('auto_track_channel'))
+
         except Exception as e:
             print(f" >>> [CRITICAL] Loop crashed in spotify_polling: {e}")
             traceback.print_exc()
+
+    def _get_member(self, user_id):
+        for guild in self.bot.guilds:
+            m = guild.get_member(user_id)
+            if m: return m
+        return None
+
+    async def _check_autostart(self, user_id, member, chan_id):
+        """Checks if an offline linked user is playing music and starts a session."""
+        tokens = spotify_tokens.get(user_id)
+        if not tokens: return
+        
+        # Token refresh if needed
+        if time.time() >= tokens.get('expires_at', 0):
+            if not await self._refresh_token(user_id, tokens): return
+            
+        session = await self.get_session()
+        headers = {"Authorization": f"Bearer {spotify_tokens[user_id]['access_token']}"}
+        
+        try:
+            async with session.get("https://api.spotify.com/v1/me/player/currently-playing", headers=headers) as resp:
+                if resp.status == 200:
+                    playback = await resp.json()
+                    if playback.get('is_playing') and playback.get('item'):
+                        # They are playing! Start a session.
+                        print(f" >>> [SYSTEM]: Auto-starting offline session for user {user_id}")
+                        await self._start_offline_session(user_id, member, chan_id, playback)
+        except Exception:
+            pass
+
+    async def _start_offline_session(self, user_id, member, chan_id, playback):
+        item = playback['item']
+        artists = [a['name'] for a in item.get('artists', [])]
+        artist_str = ", ".join(artists) if len(artists) <= 1 else ", ".join(artists[:-1]) + " and " + artists[-1]
+        current_track = f"**{item.get('name')}** by {artist_str}"
+        
+        tracked_users[user_id] = {
+            'start_time': time.time(),
+            'channel_id': chan_id,
+            'user_name': member.name if member else f"User {user_id}",
+            'duration': 3600,
+            'last_notified_song': item.get('id', item.get('name')),
+            'song_history': [current_track],
+            'skip_buffer': [],
+            'notif_task': None,
+            'last_stop_time': None,
+            'session_announced': False # Let the first poll announce it
+        }
 
     async def _poll_user_spotify(self, user_id, tracked_data, member):
         tokens = spotify_tokens[user_id]
@@ -162,7 +229,7 @@ class SpotifyAPI(commands.Cog):
                             await update_artist_stats(user_id, artists)
                         
                         channel_id = tracked_data['channel_id']
-                        target_channel = await get_presence_channel(self.bot, member.guild if member else None, channel_id)
+                        target_channel = await get_presence_channel(self.bot, None, channel_id) # API Polling fallback
                         if target_channel:
                             # Avoid spam by only posting if skip buffer is clean (simpler logic for polling)
                             album_url = item.get('album', {}).get('images', [{}])[0].get('url') if item.get('album', {}).get('images') else None
@@ -188,6 +255,7 @@ class SpotifyAPI(commands.Cog):
                             
                             await target_channel.send(embed=embed)
                             tracked_data['session_announced'] = True
+                            print(f" >>> [SYSTEM]: Announced offline track update for {display_name}")
                             
                 elif resp.status == 204:
                     # Nothing playing

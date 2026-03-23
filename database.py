@@ -36,7 +36,8 @@ def save_json():
             "user_history": {str(k): v for k, v in list(user_history.items())},
             "user_artist_counts": {str(k): v for k, v in list(user_artist_counts.items())},
             "user_settings": {str(k): v for k, v in list(user_settings.items())},
-            "spotify_tokens": {str(k): v for k, v in list(spotify_tokens.items())}
+            "spotify_tokens": {str(k): v for k, v in list(spotify_tokens.items())},
+            "tracked_users": {str(k): v for k, v in list(tracked_users.items())}
         }
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
@@ -54,7 +55,8 @@ async def save_persistent_data(user_id=None):
                 "history": user_history.get(user_id, []),
                 "artist_counts": user_artist_counts.get(user_id, {}),
                 "settings": user_settings.get(user_id, {}),
-                "spotify_token": spotify_tokens.get(user_id, {})
+                "spotify_token": spotify_tokens.get(user_id, {}),
+                "tracked_session": tracked_users.get(user_id)
             }
             await collection.update_one({"_id": str(user_id)}, {"$set": data}, upsert=True)
         except Exception as e:
@@ -76,6 +78,9 @@ async def load_persistent_data():
                 token = document.get("spotify_token", {})
                 if token:
                     spotify_tokens[uid] = token
+                session = document.get("tracked_session")
+                if session:
+                    tracked_users[uid] = session
             
             if user_history or spotify_tokens:
                 print(f" >>> [SYSTEM]: Loaded persistent data from MongoDB.")
@@ -92,6 +97,7 @@ async def load_persistent_data():
                 user_artist_counts.update({int(k): v for k, v in data.get("user_artist_counts", {}).items()})
                 user_settings.update({int(k): v for k, v in data.get("user_settings", {}).items()})
                 spotify_tokens.update({int(k): v for k, v in data.get("spotify_tokens", {}).items()})
+                tracked_users.update({int(k): v for k, v in data.get("tracked_users", {}).items()})
                 print(f" >>> [SYSTEM]: Loaded backup data from local JSON.")
         except Exception as e:
             print(f" >>> [DEBUG]: Error loading backup JSON: {e}")

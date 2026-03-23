@@ -297,8 +297,14 @@ class Tracking(commands.Cog):
         user_id = ctx.author.id
         if user_id in tracked_users:
             del tracked_users[user_id]
+            desc = f"⏹️ **Tracking stopped.** I'll no longer post Spotify updates for **{ctx.author.display_name}** in this channel."
+            
+            # Check if autotrack is on and alert the user
+            if user_settings.get(user_id, {}).get('auto_track'):
+                desc += "\n\n> ⚠️ **Note:** Your **Auto-Track** is currently **enabled**. If you continue listening to Spotify, you will be automatically re-added to the tracking list."
+
             embed = discord.Embed(
-                description=f"⏹️ **Tracking stopped.** I'll no longer post Spotify updates for **{ctx.author.display_name}** in this channel.",
+                description=desc,
                 color=discord.Color.red()
             )
             await ctx.send(embed=embed)
@@ -350,6 +356,9 @@ class Tracking(commands.Cog):
             desc = f"✅ **Auto-tracking enabled!**"
             color = discord.Color.green()
         else:
+            # Remove from tracklist if they are there
+            if user_id in tracked_users:
+                del tracked_users[user_id]
             desc = f"❌ **Auto-tracking disabled.**"
             color = discord.Color.red()
 

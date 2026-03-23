@@ -8,3 +8,4 @@ pillow
 aiohttp
 motor
 dnspython
+requests

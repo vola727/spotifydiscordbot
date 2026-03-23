@@ -17,6 +17,7 @@ collection = None
 user_history = {}
 user_artist_counts = {}
 user_settings = {}
+spotify_tokens = {} # {user_id: {access_token, refresh_token, expires_at}}
 tracked_users = {} # {user_id: {start_time, channel_id, user_name, duration, song_history, etc.}}
 
 if MONGO_URI:
@@ -34,7 +35,8 @@ def save_json():
         data = {
             "user_history": {str(k): v for k, v in list(user_history.items())},
             "user_artist_counts": {str(k): v for k, v in list(user_artist_counts.items())},
-            "user_settings": {str(k): v for k, v in list(user_settings.items())}
+            "user_settings": {str(k): v for k, v in list(user_settings.items())},
+            "spotify_tokens": {str(k): v for k, v in list(spotify_tokens.items())}
         }
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
@@ -51,7 +53,8 @@ async def save_persistent_data(user_id=None):
             data = {
                 "history": user_history.get(user_id, []),
                 "artist_counts": user_artist_counts.get(user_id, {}),
-                "settings": user_settings.get(user_id, {})
+                "settings": user_settings.get(user_id, {}),
+                "spotify_token": spotify_tokens.get(user_id, {})
             }
             await collection.update_one({"_id": str(user_id)}, {"$set": data}, upsert=True)
         except Exception as e:
@@ -59,7 +62,7 @@ async def save_persistent_data(user_id=None):
 
 async def load_persistent_data():
     """Loads user stats and settings from MongoDB (priority) or local JSON."""
-    global user_history, user_artist_counts, user_settings
+    global user_history, user_artist_counts, user_settings, spotify_tokens
     
     # 1. Try loading from MongoDB first
     if collection is not None:
@@ -70,9 +73,12 @@ async def load_persistent_data():
                 user_history[uid] = document.get("history", [])
                 user_artist_counts[uid] = document.get("artist_counts", {})
                 user_settings[uid] = document.get("settings", {})
+                token = document.get("spotify_token", {})
+                if token:
+                    spotify_tokens[uid] = token
             
-            if user_history:
-                print(f" >>> [SYSTEM]: Loaded persistent data for {len(user_history)} users from MongoDB.")
+            if user_history or spotify_tokens:
+                print(f" >>> [SYSTEM]: Loaded persistent data from MongoDB.")
                 return # Successfully loaded from DB, skip JSON
         except Exception as e:
             print(f" >>> [DEBUG]: Error loading from MongoDB: {e}")
@@ -85,6 +91,7 @@ async def load_persistent_data():
                 user_history.update({int(k): v for k, v in data.get("user_history", {}).items()})
                 user_artist_counts.update({int(k): v for k, v in data.get("user_artist_counts", {}).items()})
                 user_settings.update({int(k): v for k, v in data.get("user_settings", {}).items()})
+                spotify_tokens.update({int(k): v for k, v in data.get("spotify_tokens", {}).items()})
                 print(f" >>> [SYSTEM]: Loaded backup data from local JSON.")
         except Exception as e:
             print(f" >>> [DEBUG]: Error loading backup JSON: {e}")

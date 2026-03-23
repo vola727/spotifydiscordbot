@@ -108,10 +108,10 @@ class SpotifyAPI(commands.Cog):
 
             # 2. Re-initialize Auto-Track for linked users who aren't in the list (Offline recovery)
             linked_ids = list(spotify_tokens.keys())
-            print(f" >>> [DEBUG]: Section 2 — checking {len(linked_ids)} linked user(s) for auto-start...")
+            # print(f" >>> [DEBUG]: Section 2 — checking {len(linked_ids)} linked user(s) for auto-start...")
             for user_id in linked_ids:
                 if user_id in tracked_users:
-                    print(f" >>> [DEBUG]: {user_id} already tracked, skipping auto-start.")
+                    # print(f" >>> [DEBUG]: {user_id} already tracked, skipping auto-start.")
                     continue
                 
                 settings = user_settings.get(user_id, {})

@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import os
+import asyncio
 from dotenv import load_dotenv
 import keep_alive
 from database import load_persistent_data
@@ -50,7 +51,6 @@ async def main():
         await bot.start(TOKEN)
 
 if __name__ == "__main__":
-    import asyncio
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

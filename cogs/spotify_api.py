@@ -5,7 +5,7 @@ import aiohttp
 import time
 import asyncio
 import traceback
-from database import spotify_tokens, tracked_users, save_persistent_data, update_artist_stats, user_history
+from database import spotify_tokens, tracked_users, user_settings, save_persistent_data, update_artist_stats, user_history
 from utils import get_spotify_color, get_presence_channel
 
 class SpotifyAPI(commands.Cog):

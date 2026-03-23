@@ -66,7 +66,9 @@ class SpotifyAPI(commands.Cog):
     async def spotify_polling(self):
         """Polls Spotify API for active users if they are not playing on Discord"""
         try:
-            print(" >>> [DEBUG]: --- Polling Loop Tick ---")
+            print(f" >>> [DEBUG]: --- Polling Loop Tick ---")
+            print(f" >>> [DEBUG]: tracked_users keys: {list(tracked_users.keys())}")
+            print(f" >>> [DEBUG]: spotify_tokens keys: {list(spotify_tokens.keys())}")
             await self.bot.wait_until_ready()
             
             # 1. Handle currently tracked users (Expiration and Polling)

@@ -69,9 +69,9 @@ class SpotifyAPI(commands.Cog):
         """Polls Spotify API for active users if they are not playing on Discord"""
         try:
             self.__class__._tick += 1
-            print(f" >>> [DEBUG]: --- Polling Loop Tick #{self._tick} ---")
-            print(f" >>> [DEBUG]: tracked_users keys: {list(tracked_users.keys())}")
-            print(f" >>> [DEBUG]: spotify_tokens keys: {list(spotify_tokens.keys())}")
+            # print(f" >>> [DEBUG]: --- Polling Loop Tick #{self._tick} ---")
+            # print(f" >>> [DEBUG]: tracked_users keys: {list(tracked_users.keys())}")
+            # print(f" >>> [DEBUG]: spotify_tokens keys: {list(spotify_tokens.keys())}")
             
             # 1. Handle currently tracked users (Expiration and Polling)
             tracked_ids = list(tracked_users.keys())
@@ -100,10 +100,10 @@ class SpotifyAPI(commands.Cog):
                         spotify_activity = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
                         if spotify_activity:
                             # Discord presence is working, let Tracking cog handle it
-                            print(f" >>> [DEBUG]: {user_id} has Discord presence, skipping offline poll.")
+                            # print(f" >>> [DEBUG]: {user_id} has Discord presence, skipping offline poll.")
                             continue
                     
-                    print(f" >>> [DEBUG]: Initiating offline API poll for {user_id}...")
+                    # print(f" >>> [DEBUG]: Initiating offline API poll for {user_id}...")
                     await self._poll_user_spotify(user_id, data, member)
 
             # 2. Re-initialize Auto-Track for linked users who aren't in the list (Offline recovery)
@@ -117,13 +117,13 @@ class SpotifyAPI(commands.Cog):
                 settings = user_settings.get(user_id, {})
                 has_autotrack = settings.get('auto_track')
                 has_channel = settings.get('auto_track_channel')
-                print(f" >>> [DEBUG]: {user_id} — auto_track={has_autotrack}, channel={has_channel}")
+                # print(f" >>> [DEBUG]: {user_id} — auto_track={has_autotrack}, channel={has_channel}")
                 if has_autotrack and has_channel:
                     member = self._get_member(user_id)
                     if member:
                         activity = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
                         if activity:
-                            print(f" >>> [DEBUG]: {user_id} has Discord activity, not auto-starting.")
+                            # print(f" >>> [DEBUG]: {user_id} has Discord activity, not auto-starting.")
                             continue
                     
                     # API check to see if we should start a session
@@ -203,14 +203,14 @@ class SpotifyAPI(commands.Cog):
         }
         
         try:
-            print(f" >>> [DEBUG]: Making Spotify API request for {user_id}...")
+            # print(f" >>> [DEBUG]: Making Spotify API request for {user_id}...")
             async with session.get("https://api.spotify.com/v1/me/player/currently-playing", headers=headers) as resp:
-                print(f" >>> [DEBUG]: API request status: {resp.status} for {user_id}")
+                # print(f" >>> [DEBUG]: API request status: {resp.status} for {user_id}")
                 if resp.status == 200:
                     playback = await resp.json()
                     item = playback.get('item')
                     if not item or not playback.get('is_playing'):
-                        print(f" >>> [DEBUG]: Player is paused/stopped for {user_id}.")
+                        # print(f" >>> [DEBUG]: Player is paused/stopped for {user_id}.")
                         # Stopped playing
                         if tracked_data.get('last_stop_time') is None:
                             tracked_data['last_stop_time'] = time.time()
@@ -238,7 +238,7 @@ class SpotifyAPI(commands.Cog):
                         tracked_data['last_stop_time'] = None
 
                     if track_id != tracked_data.get('last_notified_song'):
-                        print(f" >>> [DEBUG]: New track detected! {track_id} != {tracked_data.get('last_notified_song')}")
+                        # print(f" >>> [DEBUG]: New track detected! {track_id} != {tracked_data.get('last_notified_song')}")
                         tracked_data['last_notified_song'] = track_id
                         
                         # Add to histories
@@ -283,19 +283,19 @@ class SpotifyAPI(commands.Cog):
                             print(f" >>> [SYSTEM]: Announced offline track update for {display_name}")
                             
                 elif resp.status == 204:
-                    print(f" >>> [DEBUG]: 204 No Content for {user_id}.")
+                    #print(f" >>> [DEBUG]: 204 No Content for {user_id}.")
                     # Nothing playing
                     if tracked_data.get('last_stop_time') is None:
                         tracked_data['last_stop_time'] = time.time()
                 elif resp.status == 401:
-                    print(f" >>> [DEBUG]: 401 Unauthorized for {user_id} — attempting token refresh...")
+                    # print(f" >>> [DEBUG]: 401 Unauthorized for {user_id} — attempting token refresh...")
                     await self._refresh_token(user_id, spotify_tokens[user_id])
                 elif resp.status == 403:
                     error_body = await resp.text()
-                    print(f" >>> [DEBUG]: 403 Forbidden for {user_id} — scope likely missing. Body: {error_body}")
-                    print(f" >>> [DEBUG]: User {user_id} needs to /unlink and /link again to grant correct scopes.")
-                else:
-                    print(f" >>> [DEBUG]: Unexpected status {resp.status} for {user_id}.")
+                    # print(f" >>> [DEBUG]: 403 Forbidden for {user_id} — scope likely missing. Body: {error_body}")
+                    # print(f" >>> [DEBUG]: User {user_id} needs to /unlink and /link again to grant correct scopes.")
+                # else:
+                    # print(f" >>> [DEBUG]: Unexpected status {resp.status} for {user_id}.")
                     
         except Exception as e:
             print(f" >>> [DEBUG]: Error polling Spotify API module: {e}")

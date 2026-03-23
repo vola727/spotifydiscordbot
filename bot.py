@@ -77,6 +77,8 @@ def save_json():
     except Exception as e:
          print(f" >>> [DEBUG]: Error saving local JSON: {e}")
 
+
+
 async def save_persistent_data(user_id=None):
     """Saves user stats and settings. If user_id is provided, saves specifically to MongoDB."""
     # Always save local JSON as fallback in a separate thread to avoid blocking the event loop
@@ -216,7 +218,7 @@ async def get_presence_channel(guild, fallback_channel_id):
     return fallback_channel
 
 
-async def start_tracking_session(member, channel, duration, ctx_guild=None):
+async def start_tracking_session(member, channel, duration, ctx_guild=None, is_manual=False):
     """Internal helper to initialize tracking for a user across multiple commands."""
     user_id = member.id
     guild = ctx_guild or (member.guild if hasattr(member, 'guild') else None)
@@ -224,36 +226,88 @@ async def start_tracking_session(member, channel, duration, ctx_guild=None):
     # 1. Find the Spotify activity
     spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
     if not spotify:
-        return False
+        return False, None
         
     # 2. Get target channel (fallback to provided channel or #spotify-updates)
     target_channel = await get_presence_channel(guild, channel.id)
     chan_id = target_channel.id if target_channel else channel.id
     
-    # 3. Prepare initial session data
+    # 3. Prepare tracks
     artist_str = format_artists(getattr(spotify, 'artists', []))
     current_track = f"**{getattr(spotify, 'title', 'Unknown')}** by {artist_str}"
     
+    # 4. Handle session history (Carry over if updating an existing session)
+    history = []
+    if user_id in tracked_users:
+        history = tracked_users[user_id].get('song_history', [])
+        if not history or history[0] != current_track:
+            history.insert(0, current_track)
+    else:
+        history = [current_track]
+
+    # 5. Initialize/Update tracking object
     tracked_users[user_id] = {
         'start_time': time.time(),
         'channel_id': chan_id,
         'user_name': member.name,
         'duration': duration,
         'last_notified_song': getattr(spotify, 'track_id', getattr(spotify, 'title', None)),
-        'song_history': [current_track],
+        'song_history': history[:5],
         'skip_buffer': [],
         'notif_task': None,
-        'last_stop_time': None
+        'last_stop_time': None,
+        'session_announced': is_manual  # If manual, the command usually handles the first embed
     }
     
-    # 4. Update persistent history & stats
+    # 6. Update persistent history & stats
     persist_history = user_history.get(user_id, [])
     if not persist_history or persist_history[0] != current_track:
         persist_history.insert(0, current_track)
         user_history[user_id] = persist_history[:5]
         await update_artist_stats(user_id, getattr(spotify, 'artists', []))
         
-    return True
+    return True, current_track
+
+
+async def announce_spotify_status(uid, guild_id, chan_id):
+    """Wait for stability, detect skips, and announce the song or skip summary."""
+    # Stabilize: wait for 2 seconds of no further presence changes
+    await asyncio.sleep(2.0)
+    
+    guild = bot.get_guild(guild_id)
+    if not guild: return
+    
+    # Refresh the member from the guild to get the absolute latest status
+    current_member = guild.get_member(uid)
+    if not current_member: return
+    
+    session = tracked_users.get(uid)
+    if not session: return
+    
+    buffer = session.get('skip_buffer', [])
+    target_channel = await get_presence_channel(guild, chan_id)
+    if not target_channel: return
+
+    # Check current spotify activity after the wait
+    spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', current_member.activities)
+    if not spotify: return
+
+    if len(buffer) >= 3:
+        # Summary message for 2 or more skips (3+ tracks total in buffer)
+        desc = f"⏩ **{current_member.display_name}** skipped **{len(buffer)-1}** songs."
+        embed = await create_spotify_embed(current_member, spotify, title_text=desc, color=discord.Color.blue())
+        embed.title = f"⏩ Multiple Skips: {embed.title}" if embed.title else "⏩ Multiple Skips Detected"
+        
+        await target_channel.send(embed=embed)
+    else:
+        # Normal message for single track change or first detection
+        embed = await create_spotify_embed(current_member, spotify)
+        await target_channel.send(embed=embed)
+    
+    # Clear buffer and reset task handle
+    session['skip_buffer'] = []
+    session['notif_task'] = None
+    session['session_announced'] = True
 
 
 
@@ -443,74 +497,27 @@ async def on_message(message):
 
 
     if is_spotify:
-        user_id = message.author.id
-        was_already_tracked = (user_id in tracked_users)
+        was_already_tracked = (message.author.id in tracked_users)
         
-        # 0. Get the member from cache for more reliable presence info
-        member = message.author
-        if message.guild:
-            member = message.guild.get_member(message.author.id) or message.author
+        # Get member from cache for reliable info
+        member = message.guild.get_member(message.author.id) if message.guild else message.author
         
-        # 1. Find the Spotify activity
-        spotify_activity = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
+        # Start the tracking session using the helper (is_manual=True because it's a direct invite)
+        started, current_track = await start_tracking_session(member, message.channel, 900, ctx_guild=message.guild, is_manual=True)
         
-        # 1. Prepare history and initial data
-        initial_track = None
-        if spotify_activity:
-            artist_str = format_artists(getattr(spotify_activity, 'artists', []))
-            initial_track = f"**{spotify_activity.title}** by {artist_str}"
+        if started:
+            # Prepare info for detection embed
+            spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
+            artist_str = format_artists(getattr(spotify, 'artists', []))
+            song_title = spotify.title if hasattr(spotify, 'title') else "a song"
             
-            # 1. Update active tracking
-            tracked_users[user_id] = {
-                'start_time': time.time(),
-                'channel_id': message.channel.id,
-                'user_name': message.author.name,
-                'duration': 900,  # Default 15 minutes
-                'last_notified_song': getattr(spotify_activity, 'track_id', None) if spotify_activity else None,
-                'song_history': [initial_track] if initial_track else [],
-                'skip_buffer': [],
-                'notif_task': None,
-                'last_stop_time': None
-            }
+            target_channel = await get_presence_channel(message.guild, message.channel.id)
+            title = "🎶 Tracking Refreshed!" if was_already_tracked else "🎵 Spotify Activity Detected!"
+            desc = f"Now tracking **{member.display_name}**'s playlist.\nCurrently listening to **{song_title}** by **{artist_str}**"
             
-            # 2. Update persistent history
-            if initial_track:
-                existing = user_history.get(user_id, [])
-                if not existing or existing[0] != initial_track:
-                    existing.insert(0, initial_track)
-                    user_history[user_id] = existing[:5]
-                    await update_artist_stats(user_id, getattr(spotify_activity, 'artists', []))
-        
-        # 3. Prepare the artist and song info
-        artist_str = "Unknown Artist"
-        song_title = "a song"
-        if spotify_activity:
-            song_title = spotify_activity.title
-            artist_str = format_artists(getattr(spotify_activity, 'artists', []))
-        
-        # 3. Send the appropriate message
-        target_channel = await get_presence_channel(message.guild, message.channel.id)
-        
-        if was_already_tracked:
-            title = "🎶 Tracking Refreshed!"
-            desc = f"**{message.author.display_name}** is listening to **{song_title}** by **{artist_str}**"
-        else:
-            title = "🎵 Spotify Activity Detected!"
-            desc = f"Now tracking **{message.author.display_name}**'s playlist for 15 minutes.\nCurrently listening to **{song_title}** by **{artist_str}**"
-        
-        embed = await create_spotify_embed(member, spotify_activity, title_text=desc)
-        embed.title = f"{title}: {embed.title}" if embed.title else title
-        
-        await target_channel.send(embed=embed)
-
-    # Check if the message is from our active target
-    # This checks both the Channel ID (for servers) and Author ID (for DMs)
-    # if state.active_target_id and state.receivemessages:
-    #     if message.channel.id == state.active_target_id or message.author.id == state.active_target_id:
-    #         location = f"DM" if isinstance(message.channel, discord.DMChannel) else f"#{message.channel.name}"
-    #         print(f"[{location}] {message.author}: {message.content}")
-
-
+            embed = await create_spotify_embed(member, spotify, title_text=desc)
+            embed.title = f"{title}: {embed.title}" if embed.title else title
+            await target_channel.send(embed=embed)
     
     await bot.process_commands(message)
 
@@ -560,17 +567,22 @@ async def on_presence_update(before, after):
         # 2. Detect when it resumes
         if after_spotify:
             # Check for "ad gap" (20-60 seconds)
-            if data.get('last_stop_time'):
+            # ONLY fire if they are currently in the tracklist and have had at least one song announced
+            if data.get('last_stop_time') and data.get('session_announced'):
                 elapsed = time.time() - data['last_stop_time']
                 if 20 <= elapsed <= 90:
+                    # ONLY send the "ad" message if they are actively being tracked
                     target_channel = await get_presence_channel(after.guild, channel_id)
                     if target_channel:
-                        embed = discord.Embed(
-                            description=f"<@{user_id}> haha bro got an ad 🫵🤣",
-                            color=discord.Color.orange()
-                        )
-                        await target_channel.send(embed=embed)
-                # Reset stop time regardless of duration
+                        # Double check they are still in tracked_users before sending
+                        if user_id in tracked_users:
+                            embed = discord.Embed(
+                                description=f"<@{user_id}> haha bro got an ad 🫵🤣",
+                                color=discord.Color.orange()
+                            )
+                            await target_channel.send(embed=embed)
+                
+                # Reset stop time regardless of duration to prevent duplicate firing
                 data['last_stop_time'] = None
 
             track_id = getattr(after_spotify, 'track_id', after_spotify.title)
@@ -597,45 +609,6 @@ async def on_presence_update(before, after):
                     user_history[user_id] = persist_history[:5]
                     await update_artist_stats(user_id, getattr(after_spotify, 'artists', []))
 
-                # --- Skip Detection and Delayed Notification ---
-                async def send_notification(uid, guild_id, chan_id):
-                    # Stabilize: wait for 2 seconds of no further presence changes
-                    await asyncio.sleep(2.0)
-                    
-                    guild = bot.get_guild(guild_id)
-                    if not guild: return
-                    
-                    # Refresh the member from the guild to get the absolute latest status
-                    current_member = guild.get_member(uid)
-                    if not current_member: return
-                    
-                    session = tracked_users.get(uid)
-                    if not session: return
-                    
-                    buffer = session.get('skip_buffer', [])
-                    target_channel = await get_presence_channel(guild, chan_id)
-                    if not target_channel: return
-
-                    # Check current spotify activity after the wait
-                    spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', current_member.activities)
-                    if not spotify: return
-
-                    if len(buffer) >= 3:
-                        # Summary message for 2 or more skips (3+ tracks total in buffer)
-                        desc = f"⏩ **{current_member.display_name}** skipped **{len(buffer)-1}** songs."
-                        embed = await create_spotify_embed(current_member, spotify, title_text=desc, color=discord.Color.blue())
-                        embed.title = f"⏩ Multiple Skips: {embed.title}" if embed.title else "⏩ Multiple Skips Detected"
-                        
-                        await target_channel.send(embed=embed)
-                    else:
-                        # Normal message for single track change or first detection
-                        embed = await create_spotify_embed(current_member, spotify)
-                        await target_channel.send(embed=embed)
-                    
-                    # Clear buffer and reset task handle
-                    session['skip_buffer'] = []
-                    session['notif_task'] = None
-
                 # Manage existing task and buffer to ensure we only send ONE message once they STOP skipping
                 if data.get('notif_task'):
                     data['notif_task'].cancel()
@@ -643,11 +616,11 @@ async def on_presence_update(before, after):
                 if 'skip_buffer' not in data: 
                     data['skip_buffer'] = []
                 
-                # Add the track to skip buffer (even if it's the first one in the skip chain)
+                # Add the track to skip buffer
                 data['skip_buffer'].append(new_track)
                 
                 # Start/Restart the 2-second stability timer
-                data['notif_task'] = bot.loop.create_task(send_notification(user_id, after.guild.id, channel_id))
+                data['notif_task'] = bot.loop.create_task(announce_spotify_status(user_id, after.guild.id, channel_id))
 
     # 2. Handle Auto-Track Initialization for non-tracked users
     else:
@@ -661,29 +634,17 @@ async def on_presence_update(before, after):
                 
                 # Check if target_channel belongs to 'after.guild'
                 if target_channel and hasattr(target_channel, 'guild') and target_channel.guild.id == after.guild.id:
-                    # Prepare initial data
-                    artist_str = format_artists(getattr(after_spotify, 'artists', []))
-                    current_track = f"**{after_spotify.title}** by {artist_str}"
+                    # Use helper for initialization
+                    started, current_track = await start_tracking_session(after, target_channel, 3600, ctx_guild=after.guild)
                     
-                    # Initialize tracking
-                    tracked_users[user_id] = {
-                        'start_time': time.time(),
-                        'channel_id': channel_id,
-                        'user_name': after.name,
-                        'duration': 3600,  # Default 1 hour for auto-track
-                        'last_notified_song': getattr(after_spotify, 'track_id', after_spotify.title),
-                        'song_history': [current_track],
-                        'skip_buffer': [],
-                        'notif_task': None,
-                        'last_stop_time': None
-                    }
-                    
-                    # Update persistent history & artist stats
-                    persist_history = user_history.get(user_id, [])
-                    if not persist_history or persist_history[0] != current_track:
-                        persist_history.insert(0, current_track)
-                        user_history[user_id] = persist_history[:5]
-                        await update_artist_stats(user_id, getattr(after_spotify, 'artists', []))
+                    if started:
+                        # TRIGGER THE FIRST ANNOUNCEMENT!
+                        # Clear any existing task (rare)
+                        if tracked_users[user_id].get('notif_task'):
+                            tracked_users[user_id]['notif_task'].cancel()
+                            
+                        tracked_users[user_id]['skip_buffer'].append(current_track)
+                        tracked_users[user_id]['notif_task'] = bot.loop.create_task(announce_spotify_status(user_id, after.guild.id, channel_id))
 
 @bot.hybrid_command(name="tracklist", description="Display everyone currently being tracked for their Spotify music status")
 async def tracklist(ctx):
@@ -753,51 +714,18 @@ async def trackme(ctx, minutes: int):
 
     was_already_tracked = (user_id in tracked_users)
     
-    # Prepare song info
-    song_title = getattr(spotify, 'title', 'Unknown Song')
-    artist_str = format_artists(getattr(spotify, 'artists', []))
+    # Use helper to initialize
+    started, current_track = await start_tracking_session(member, ctx.channel, minutes * 60, ctx_guild=ctx.guild, is_manual=True)
     
-    current_track = f"**{song_title}** by {artist_str}"
-    
-    # Get existing history if updating
-    history = []
-    if was_already_tracked:
-        history = tracked_users[user_id].get('song_history', [])
-        if not history or history[0] != current_track:
-            history.insert(0, current_track)
-    else:
-        history = [current_track]
-
-    tracked_users[user_id] = {
-        'start_time': time.time(),
-        'channel_id': ctx.channel.id,
-        'user_name': ctx.author.name,
-        'duration': minutes * 60,
-        'last_notified_song': getattr(spotify, 'track_id', spotify.title),
-        'song_history': history[:5],
-        'skip_buffer': [],
-        'notif_task': None,
-        'last_stop_time': None
-    }
-    
-    # Update persistent history
-    persist_history = user_history.get(user_id, [])
-    if not persist_history or persist_history[0] != current_track:
-        persist_history.insert(0, current_track)
-        user_history[user_id] = persist_history[:5]
-        await update_artist_stats(user_id, getattr(spotify, 'artists', []))
-
-    if was_already_tracked:
-        title = "✅ Tracking Updated!"
-        desc = f"I'll continue to monitor your Spotify activity for the next {minutes} minutes in this channel."
-    else:
-        title = "🎵 Now Tracking!"
+    if started:
+        title = "✅ Tracking Updated!" if was_already_tracked else "🎵 Now Tracking!"
         desc = f"I'll post your Spotify updates in this channel for the next {minutes} minutes."
 
-    embed = await create_spotify_embed(member, spotify, title_text=desc)
-    embed.title = f"{title}: {embed.title}" if embed.title else title
-    
-    await ctx.send(embed=embed)
+        embed = await create_spotify_embed(member, spotify, title_text=desc)
+        embed.title = f"{title}: {embed.title}" if embed.title else title
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send("❌ Failed to start tracking session.")
 
 
 @bot.hybrid_command(name="ping", description="Check the bot's latency")
@@ -966,7 +894,8 @@ async def autotrack(ctx):
         
         # Start tracking immediately if already listening
         member = ctx.guild.get_member(user_id) if ctx.guild else ctx.author
-        started = await start_tracking_session(member, ctx.channel, 3600, ctx_guild=ctx.guild)
+        # We set is_manual=True here because the user EXPLICITLY triggered this via button, so we handle the notification manually below.
+        started, current_track = await start_tracking_session(member, ctx.channel, 3600, ctx_guild=ctx.guild, is_manual=True)
         
         # Check for #spotify-updates for the message description
         has_named_channel = any(c.name.lower().strip() == "spotify-updates" for c in ctx.guild.text_channels) if ctx.guild else False

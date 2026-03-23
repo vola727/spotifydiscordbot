@@ -62,14 +62,16 @@ class SpotifyAPI(commands.Cog):
             )
             await ctx.send(embed=embed, ephemeral=True)
 
+    _tick = 0
+
     @tasks.loop(seconds=15)
     async def spotify_polling(self):
         """Polls Spotify API for active users if they are not playing on Discord"""
         try:
-            print(f" >>> [DEBUG]: --- Polling Loop Tick ---")
+            self.__class__._tick += 1
+            print(f" >>> [DEBUG]: --- Polling Loop Tick #{self._tick} ---")
             print(f" >>> [DEBUG]: tracked_users keys: {list(tracked_users.keys())}")
             print(f" >>> [DEBUG]: spotify_tokens keys: {list(spotify_tokens.keys())}")
-            await self.bot.wait_until_ready()
             
             # 1. Handle currently tracked users (Expiration and Polling)
             tracked_ids = list(tracked_users.keys())
@@ -106,22 +108,36 @@ class SpotifyAPI(commands.Cog):
 
             # 2. Re-initialize Auto-Track for linked users who aren't in the list (Offline recovery)
             linked_ids = list(spotify_tokens.keys())
+            print(f" >>> [DEBUG]: Section 2 — checking {len(linked_ids)} linked user(s) for auto-start...")
             for user_id in linked_ids:
-                if user_id in tracked_users: continue
+                if user_id in tracked_users:
+                    print(f" >>> [DEBUG]: {user_id} already tracked, skipping auto-start.")
+                    continue
                 
                 settings = user_settings.get(user_id, {})
-                if settings.get('auto_track') and settings.get('auto_track_channel'):
+                has_autotrack = settings.get('auto_track')
+                has_channel = settings.get('auto_track_channel')
+                print(f" >>> [DEBUG]: {user_id} — auto_track={has_autotrack}, channel={has_channel}")
+                if has_autotrack and has_channel:
                     member = self._get_member(user_id)
                     if member:
                         activity = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
-                        if activity: continue
+                        if activity:
+                            print(f" >>> [DEBUG]: {user_id} has Discord activity, not auto-starting.")
+                            continue
                     
                     # API check to see if we should start a session
-                    await self._check_autostart(user_id, member, settings.get('auto_track_channel'))
+                    await self._check_autostart(user_id, member, has_channel)
 
         except Exception as e:
             print(f" >>> [CRITICAL] Loop crashed in spotify_polling: {e}")
             traceback.print_exc()
+
+    @spotify_polling.before_loop
+    async def before_spotify_polling(self):
+        print(" >>> [DEBUG]: Waiting for bot to be ready before starting polling loop...")
+        await self.bot.wait_until_ready()
+        print(" >>> [DEBUG]: Bot ready — polling loop starting.")
 
     def _get_member(self, user_id):
         for guild in self.bot.guilds:

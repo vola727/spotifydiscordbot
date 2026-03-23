@@ -9,10 +9,6 @@ import time
 
 app = Flask('')
 
-SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
-SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
-SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "http://localhost:8080/callback")
-
 bot_loop = None
 
 def set_bot_loop(loop):
@@ -29,12 +25,15 @@ def login():
     if not user_id:
         return "Missing user_id", 400
         
+    client_id = os.getenv("SPOTIFY_CLIENT_ID")
+    redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI", "http://localhost:8080/callback")
+        
     scope = 'user-read-currently-playing user-read-playback-state user-read-recently-played'
     params = {
         'response_type': 'code',
-        'client_id': SPOTIFY_CLIENT_ID,
+        'client_id': client_id,
         'scope': scope,
-        'redirect_uri': SPOTIFY_REDIRECT_URI,
+        'redirect_uri': redirect_uri,
         'state': user_id
     }
     url = 'https://accounts.spotify.com/authorize?' + urllib.parse.urlencode(params)
@@ -58,12 +57,16 @@ def callback():
         return "Invalid state parameter", 400
 
     token_url = "https://accounts.spotify.com/api/token"
+    client_id = os.getenv("SPOTIFY_CLIENT_ID")
+    client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
+    redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI", "http://localhost:8080/callback")
+    
     auth_response = requests.post(token_url, data={
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": SPOTIFY_REDIRECT_URI,
-        "client_id": SPOTIFY_CLIENT_ID,
-        "client_secret": SPOTIFY_CLIENT_SECRET,
+        "redirect_uri": redirect_uri,
+        "client_id": client_id,
+        "client_secret": client_secret,
     })
     
     auth_data = auth_response.json()

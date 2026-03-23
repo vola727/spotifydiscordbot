@@ -4,8 +4,9 @@ import os
 import aiohttp
 import time
 import asyncio
+import traceback
 from database import spotify_tokens, tracked_users, save_persistent_data, update_artist_stats, user_history
-from utils import get_spotify_color
+from utils import get_spotify_color, get_presence_channel
 
 class SpotifyAPI(commands.Cog):
     def __init__(self, bot):
@@ -41,38 +42,62 @@ class SpotifyAPI(commands.Cog):
         )
         await ctx.send(embed=embed, ephemeral=True)
 
-    @tasks.loop(seconds=30)
+    @commands.hybrid_command(name="unlink", description="Unlink your Spotify account and revoke offline tracking access")
+    async def unlink(self, ctx):
+        await ctx.defer(ephemeral=True)
+        user_id = ctx.author.id
+        
+        if user_id in spotify_tokens:
+            del spotify_tokens[user_id]
+            await save_persistent_data(user_id)
+            embed = discord.Embed(
+                description="✅ **Successfully unlinked your Spotify account.** I will no longer track your listening activity while you are offline.",
+                color=discord.Color.green()
+            )
+            await ctx.send(embed=embed, ephemeral=True)
+        else:
+            embed = discord.Embed(
+                description="❌ **You don't have a linked Spotify account.**",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed, ephemeral=True)
+
+    @tasks.loop(seconds=15)
     async def spotify_polling(self):
         """Polls Spotify API for active users if they are not playing on Discord"""
-        await self.bot.wait_until_ready()
-        
-        # Snapshot keys to avoid RuntimeError
-        user_ids = list(tracked_users.keys())
-        for user_id in user_ids:
-            if user_id not in tracked_users:
-                continue
-            data = tracked_users[user_id]
+        try:
+            await self.bot.wait_until_ready()
             
-            # Only poll if we have their token
-            if user_id not in spotify_tokens:
-                continue
-                
-            # Check if discord is already showing them playing Spotify
-            member = None
-            for guild in self.bot.guilds:
-                member_in_guild = guild.get_member(user_id)
-                if member_in_guild:
-                    member = member_in_guild
-                    break
-                    
-            if member:
-                spotify_activity = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
-                if spotify_activity:
-                    # They are online and Discord is picking it up. Skip polling.
+            # Snapshot keys to avoid RuntimeError
+            user_ids = list(tracked_users.keys())
+            for user_id in user_ids:
+                if user_id not in tracked_users:
                     continue
-            
-            # They are either offline, or Discord isn't picking it up. Let's ask Spotify.
-            await self._poll_user_spotify(user_id, data, member)
+                data = tracked_users[user_id]
+                
+                # Only poll if we have their token
+                if user_id not in spotify_tokens:
+                    continue
+                    
+                # Check if discord is already showing them playing Spotify
+                member = None
+                for guild in self.bot.guilds:
+                    member_in_guild = guild.get_member(user_id)
+                    if member_in_guild:
+                        member = member_in_guild
+                        break
+                        
+                if member:
+                    spotify_activity = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities)
+                    if spotify_activity:
+                        # They are online and Discord is picking it up. Skip polling.
+                        continue
+                
+                # They are either offline, or Discord isn't picking it up. Let's ask Spotify.
+                await self._poll_user_spotify(user_id, data, member)
+        except Exception as e:
+            print(f" >>> [CRITICAL] Loop crashed in spotify_polling: {e}")
+            traceback.print_exc()
 
     async def _poll_user_spotify(self, user_id, tracked_data, member):
         tokens = spotify_tokens[user_id]
@@ -112,7 +137,7 @@ class SpotifyAPI(commands.Cog):
                         if 20 <= elapsed <= 90:
                             # Send ad gap message
                             channel_id = tracked_data['channel_id']
-                            target_channel = self.bot.get_channel(channel_id)
+                            target_channel = await get_presence_channel(self.bot, member.guild if member else None, channel_id)
                             if target_channel:
                                 embed = discord.Embed(
                                     description=f"<@{user_id}> haha bro got an ad 🫵🤣",
@@ -137,7 +162,7 @@ class SpotifyAPI(commands.Cog):
                             await update_artist_stats(user_id, artists)
                         
                         channel_id = tracked_data['channel_id']
-                        target_channel = self.bot.get_channel(channel_id)
+                        target_channel = await get_presence_channel(self.bot, member.guild if member else None, channel_id)
                         if target_channel:
                             # Avoid spam by only posting if skip buffer is clean (simpler logic for polling)
                             album_url = item.get('album', {}).get('images', [{}])[0].get('url') if item.get('album', {}).get('images') else None

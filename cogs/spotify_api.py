@@ -287,6 +287,15 @@ class SpotifyAPI(commands.Cog):
                     # Nothing playing
                     if tracked_data.get('last_stop_time') is None:
                         tracked_data['last_stop_time'] = time.time()
+                elif resp.status == 401:
+                    print(f" >>> [DEBUG]: 401 Unauthorized for {user_id} — attempting token refresh...")
+                    await self._refresh_token(user_id, spotify_tokens[user_id])
+                elif resp.status == 403:
+                    error_body = await resp.text()
+                    print(f" >>> [DEBUG]: 403 Forbidden for {user_id} — scope likely missing. Body: {error_body}")
+                    print(f" >>> [DEBUG]: User {user_id} needs to /unlink and /link again to grant correct scopes.")
+                else:
+                    print(f" >>> [DEBUG]: Unexpected status {resp.status} for {user_id}.")
                     
         except Exception as e:
             print(f" >>> [DEBUG]: Error polling Spotify API module: {e}")

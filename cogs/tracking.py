@@ -139,13 +139,12 @@ class Tracking(commands.Cog):
                 artist_str = format_artists(getattr(spotify, 'artists', []))
                 song_title = spotify.title if hasattr(spotify, 'title') else "a song"
                 
-                target_channel = await get_presence_channel(self.bot, message.guild, message.channel.id)
                 title = "🎶 Tracking Refreshed!" if was_already_tracked else "🎵 Spotify Activity Detected!"
                 desc = f"Now tracking **{member.display_name}**'s playlist.\nCurrently listening to **{song_title}** by **{artist_str}**"
                 
                 embed = await create_spotify_embed(member, spotify, title_text=desc)
                 embed.title = f"{title}: {embed.title}" if embed.title else title
-                await target_channel.send(embed=embed)
+                await message.channel.send(embed=embed)
 
     @commands.Cog.listener()
     async def on_presence_update(self, before, after):

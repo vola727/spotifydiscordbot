@@ -8,9 +8,10 @@ from database import (
     tracked_users, user_history, user_artist_counts, 
     user_settings, save_persistent_data, update_artist_stats
 )
+import re
 from utils import (
     format_artists, get_presence_channel, 
-    create_spotify_embed, get_spotify_color
+    create_spotify_embed, get_spotify_color, fetch_spotify_track
 )
 
 async def start_tracking_session(bot, member, channel, duration, ctx_guild=None, is_manual=False):
@@ -145,6 +146,33 @@ class Tracking(commands.Cog):
                 embed = await create_spotify_embed(member, spotify, title_text=desc)
                 embed.title = f"{title}: {embed.title}" if embed.title else title
                 await message.channel.send(embed=embed)
+
+        track_match = re.search(r"https://open\.spotify\.com/track/([a-zA-Z0-9]+)", message.content)
+        if track_match:
+            track_id = track_match.group(1).split("?")[0]
+            track_data = await fetch_spotify_track(track_id)
+            if track_data and not track_data.get('error'):
+                artists = ", ".join([a['name'] for a in track_data.get('artists', [])])
+                track_title = track_data.get('name')
+                album = track_data.get('album', {}).get('name', 'Unknown Album')
+                album_url = track_data.get('album', {}).get('images', [{}])[0].get('url') if track_data.get('album', {}).get('images') else None
+                
+                embed = discord.Embed(
+                    title=track_title,
+                    url=f"https://open.spotify.com/track/{track_id}",
+                    timestamp=discord.utils.utcnow()
+                )
+                embed.color = await get_spotify_color(album_url) if album_url else discord.Color.green()
+                
+                embed.add_field(name="Artist", value=artists, inline=True)
+                embed.add_field(name="Album", value=album, inline=True)
+                
+                if album_url:
+                    embed.set_thumbnail(url=album_url)
+                    
+                embed.set_footer(text="its so peak :sob:")
+                
+                await message.reply(embed=embed, mention_author=False)
 
     @commands.Cog.listener()
     async def on_presence_update(self, before, after):

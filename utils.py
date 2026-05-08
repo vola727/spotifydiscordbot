@@ -4,6 +4,9 @@ import asyncio
 from io import BytesIO
 from colorthief import ColorThief
 import datetime
+import os
+import base64
+import time
 
 # Cache for album cover colors: {album_cover_url: discord.Color}
 album_color_cache = {}
@@ -16,6 +19,45 @@ async def get_session():
     if _session is None or _session.closed:
         _session = aiohttp.ClientSession()
     return _session
+
+_app_token = None
+_app_token_expires = 0
+
+async def get_app_token():
+    global _app_token, _app_token_expires
+    if _app_token and time.time() < _app_token_expires:
+        return _app_token
+        
+    client_id = os.getenv("SPOTIFY_CLIENT_ID")
+    client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        return None
+        
+    session = await get_session()
+    auth_str = f"{client_id}:{client_secret}"
+    b64_auth_str = base64.b64encode(auth_str.encode()).decode()
+    headers = {"Authorization": f"Basic {b64_auth_str}"}
+    data = {"grant_type": "client_credentials"}
+    
+    async with session.post("https://accounts.spotify.com/api/token", headers=headers, data=data) as resp:
+        if resp.status == 200:
+            res = await resp.json()
+            _app_token = res.get("access_token")
+            _app_token_expires = time.time() + res.get("expires_in", 3600) - 60
+            return _app_token
+    return None
+
+async def fetch_spotify_track(track_id):
+    token = await get_app_token()
+    if not token:
+        return None
+        
+    session = await get_session()
+    headers = {"Authorization": f"Bearer {token}"}
+    async with session.get(f"https://api.spotify.com/v1/tracks/{track_id}", headers=headers) as resp:
+        if resp.status == 200:
+            return await resp.json()
+    return None
 
 async def get_spotify_color(url: str):
     """Downloads the album cover and extracts the dominant color."""

@@ -32,12 +32,17 @@ if MONGO_URI:
 def save_json():
     """Fallback to save dictionaries to a local JSON file."""
     try:
+        cleaned_tracked_users = {}
+        for k, v in list(tracked_users.items()):
+            cleaned_session = {sk: sv for sk, sv in v.items() if sk != 'notif_task'}
+            cleaned_tracked_users[str(k)] = cleaned_session
+
         data = {
             "user_history": {str(k): v for k, v in list(user_history.items())},
             "user_artist_counts": {str(k): v for k, v in list(user_artist_counts.items())},
             "user_settings": {str(k): v for k, v in list(user_settings.items())},
             "spotify_tokens": {str(k): v for k, v in list(spotify_tokens.items())},
-            "tracked_users": {str(k): v for k, v in list(tracked_users.items())}
+            "tracked_users": cleaned_tracked_users
         }
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
@@ -51,12 +56,15 @@ async def save_persistent_data(user_id=None):
 
     if collection is not None and user_id:
         try:
+            session = tracked_users.get(user_id)
+            cleaned_session = {k: v for k, v in session.items() if k != 'notif_task'} if session else None
+
             data = {
                 "history": user_history.get(user_id, []),
                 "artist_counts": user_artist_counts.get(user_id, {}),
                 "settings": user_settings.get(user_id, {}),
                 "spotify_token": spotify_tokens.get(user_id, {}),
-                "tracked_session": tracked_users.get(user_id)
+                "tracked_session": cleaned_session
             }
             await collection.update_one({"_id": str(user_id)}, {"$set": data}, upsert=True)
         except Exception as e:

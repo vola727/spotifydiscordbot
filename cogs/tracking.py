@@ -6,7 +6,8 @@ import time
 import datetime
 from database import (
     tracked_users, user_history, user_artist_counts, 
-    user_settings, save_persistent_data, update_artist_stats
+    user_settings, save_persistent_data, update_artist_stats,
+    update_minutes_listened
 )
 import re
 from utils import (
@@ -47,7 +48,8 @@ async def start_tracking_session(bot, member, channel, duration, ctx_guild=None,
         'skip_buffer': [],
         'notif_task': None,
         'last_stop_time': None,
-        'session_announced': is_manual
+        'session_announced': is_manual,
+        'current_song_start_time': time.time()
     }
     
     persist_history = user_history.get(user_id, [])
@@ -198,10 +200,23 @@ class Tracking(commands.Cog):
                     data['start_time'] = time.time()
                     data['duration'] = 3600 
                 else:
+                    if data.get('current_song_start_time'):
+                        listened_secs = time.time() - data['current_song_start_time']
+                        if before_spotify and hasattr(before_spotify, 'duration') and before_spotify.duration:
+                            listened_secs = min(listened_secs, before_spotify.duration.total_seconds())
+                        if listened_secs > 10:
+                            await update_minutes_listened(user_id, listened_secs)
                     del tracked_users[user_id]
                     return
 
             if before_spotify and not after_spotify:
+                if data.get('current_song_start_time'):
+                    listened_secs = time.time() - data['current_song_start_time']
+                    if hasattr(before_spotify, 'duration') and before_spotify.duration:
+                        listened_secs = min(listened_secs, before_spotify.duration.total_seconds())
+                    if listened_secs > 10:
+                        await update_minutes_listened(user_id, listened_secs)
+                    data['current_song_start_time'] = None
                 data['last_stop_time'] = time.time()
                 return
 
@@ -218,9 +233,19 @@ class Tracking(commands.Cog):
                                 )
                                 await target_channel.send(embed=embed)
                     data['last_stop_time'] = None
+                    if not data.get('current_song_start_time'):
+                        data['current_song_start_time'] = time.time()
 
                 track_id = getattr(after_spotify, 'track_id', after_spotify.title)
                 if track_id != data.get('last_notified_song'):
+                    if data.get('current_song_start_time'):
+                        listened_secs = time.time() - data['current_song_start_time']
+                        if before_spotify and hasattr(before_spotify, 'duration') and before_spotify.duration:
+                            listened_secs = min(listened_secs, before_spotify.duration.total_seconds())
+                        if listened_secs > 10:
+                            await update_minutes_listened(user_id, listened_secs)
+                    data['current_song_start_time'] = time.time()
+                    
                     tracked_users[user_id]['last_notified_song'] = track_id
                     artist_str = format_artists(getattr(after_spotify, 'artists', []))
                     new_track = f"**{after_spotify.title}** by {artist_str}"
@@ -323,6 +348,11 @@ class Tracking(commands.Cog):
         await ctx.defer()
         user_id = ctx.author.id
         if user_id in tracked_users:
+            data = tracked_users[user_id]
+            if data.get('current_song_start_time'):
+                listened_secs = time.time() - data['current_song_start_time']
+                if listened_secs > 10:
+                    await update_minutes_listened(user_id, min(listened_secs, 900))
             del tracked_users[user_id]
             desc = f"⏹️ **Tracking stopped.** I'll no longer post Spotify updates for **{ctx.author.display_name}** in this channel."
             
@@ -385,6 +415,11 @@ class Tracking(commands.Cog):
         else:
             # Remove from tracklist if they are there
             if user_id in tracked_users:
+                data = tracked_users[user_id]
+                if data.get('current_song_start_time'):
+                    listened_secs = time.time() - data['current_song_start_time']
+                    if listened_secs > 10:
+                        await update_minutes_listened(user_id, min(listened_secs, 900))
                 del tracked_users[user_id]
             desc = f"❌ **Auto-tracking disabled.**"
             color = discord.Color.red()

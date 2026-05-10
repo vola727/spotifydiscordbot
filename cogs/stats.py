@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 import datetime
-from database import user_history, user_artist_counts
+from database import user_history, user_artist_counts, user_minutes_listened
 from utils import create_spotify_embed
 
 class Stats(commands.Cog):
@@ -97,6 +97,46 @@ class Stats(commands.Cog):
             return
 
         embed = await create_spotify_embed(target_member, spotify)
+        await ctx.send(embed=embed)
+
+    @commands.hybrid_command(name="minutes", description="Show how many minutes of Spotify you have listened to while tracked")
+    async def minutes(self, ctx, member: discord.Member = None):
+        """Displays the amount of minutes a user has listened to while tracked."""
+        await ctx.defer()
+        target_member = member or ctx.author
+        user_id = target_member.id
+
+        data = user_minutes_listened.get(user_id, {"total": 0, "months": {}, "weeks": {}})
+        if isinstance(data, (int, float)):
+            data = {"total": data, "months": {}, "weeks": {}}
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        month_key = now.strftime("%Y-%m")
+        year, week, _ = now.isocalendar()
+        week_key = f"{year}-W{week:02d}"
+
+        total_secs = data.get("total", 0)
+        month_secs = data.get("months", {}).get(month_key, 0)
+        week_secs = data.get("weeks", {}).get(week_key, 0)
+
+        total_mins = int(total_secs // 60)
+        month_mins = int(month_secs // 60)
+        week_mins = int(week_secs // 60)
+
+        embed = discord.Embed(
+            title=f"⏱️ Minutes Listened for {target_member.display_name}",
+            color=discord.Color.green(),
+            description=(
+                f"**This Week:** `{week_mins} minutes`\n"
+                f"**This Month:** `{month_mins} minutes`\n"
+                f"**Total Time:** `{total_mins} minutes`"
+            )
+        )
+
+        if target_member.display_avatar:
+            embed.set_thumbnail(url=target_member.display_avatar.url)
+
+        embed.set_footer(text="Disclaimer: If the bot didn't track your listening session, your minutes wouldn't have been counted.")
         await ctx.send(embed=embed)
 
 async def setup(bot):

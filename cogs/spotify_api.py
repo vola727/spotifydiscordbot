@@ -5,7 +5,7 @@ import aiohttp
 import time
 import asyncio
 import traceback
-from database import spotify_tokens, tracked_users, user_settings, save_persistent_data, update_artist_stats, user_history
+from database import spotify_tokens, tracked_users, user_settings, save_persistent_data, update_artist_stats, user_history, update_minutes_listened
 from utils import get_spotify_color, get_presence_channel
 
 class SpotifyAPI(commands.Cog):
@@ -90,6 +90,10 @@ class SpotifyAPI(commands.Cog):
                         data['duration'] = 3600
                     else:
                         print(f" >>> [SYSTEM]: Tracking session expired for {data.get('user_name', user_id)} (API Cleanup)")
+                        if data.get('current_song_start_time'):
+                            listened_secs = time.time() - data['current_song_start_time']
+                            if listened_secs > 10:
+                                await update_minutes_listened(user_id, min(listened_secs, 900))
                         del tracked_users[user_id]
                         continue
 
@@ -184,7 +188,8 @@ class SpotifyAPI(commands.Cog):
             'skip_buffer': [],
             'notif_task': None,
             'last_stop_time': None,
-            'session_announced': False # Let the first poll announce it
+            'session_announced': False,
+            'current_song_start_time': time.time()
         }
 
     async def _poll_user_spotify(self, user_id, tracked_data, member):
@@ -210,8 +215,12 @@ class SpotifyAPI(commands.Cog):
                     playback = await resp.json()
                     item = playback.get('item')
                     if not item or not playback.get('is_playing'):
-                        # print(f" >>> [DEBUG]: Player is paused/stopped for {user_id}.")
                         # Stopped playing
+                        if tracked_data.get('current_song_start_time'):
+                            listened_secs = time.time() - tracked_data['current_song_start_time']
+                            if listened_secs > 10:
+                                await update_minutes_listened(user_id, min(listened_secs, 900))
+                            tracked_data['current_song_start_time'] = None
                         if tracked_data.get('last_stop_time') is None:
                             tracked_data['last_stop_time'] = time.time()
                         return
@@ -236,9 +245,18 @@ class SpotifyAPI(commands.Cog):
                                 )
                                 await target_channel.send(embed=embed)
                         tracked_data['last_stop_time'] = None
+                        if not tracked_data.get('current_song_start_time'):
+                            tracked_data['current_song_start_time'] = time.time()
 
                     if track_id != tracked_data.get('last_notified_song'):
-                        # print(f" >>> [DEBUG]: New track detected! {track_id} != {tracked_data.get('last_notified_song')}")
+                        if tracked_data.get('current_song_start_time'):
+                            listened_secs = time.time() - tracked_data['current_song_start_time']
+                            max_duration = item.get('duration_ms', 900000) / 1000.0
+                            listened_secs = min(listened_secs, max_duration)
+                            if listened_secs > 10:
+                                await update_minutes_listened(user_id, listened_secs)
+                        tracked_data['current_song_start_time'] = time.time()
+                        
                         tracked_data['last_notified_song'] = track_id
                         
                         # Add to histories
@@ -283,8 +301,11 @@ class SpotifyAPI(commands.Cog):
                             print(f" >>> [SYSTEM]: Announced offline track update for {display_name}")
                             
                 elif resp.status == 204:
-                    #print(f" >>> [DEBUG]: 204 No Content for {user_id}.")
-                    # Nothing playing
+                    if tracked_data.get('current_song_start_time'):
+                        listened_secs = time.time() - tracked_data['current_song_start_time']
+                        if listened_secs > 10:
+                            await update_minutes_listened(user_id, min(listened_secs, 900))
+                        tracked_data['current_song_start_time'] = None
                     if tracked_data.get('last_stop_time') is None:
                         tracked_data['last_stop_time'] = time.time()
                 elif resp.status == 401:

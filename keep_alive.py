@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template
+from flask import Flask, request, render_template, send_from_directory
 from threading import Thread
 import os
 import requests
@@ -19,6 +19,14 @@ def set_bot_loop(loop):
 def set_bot(b):
     global bot_instance
     bot_instance = b
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(
+        os.path.join(app.root_path, 'static'),
+        'favicon.png',
+        mimetype='image/png'
+    )
 
 @app.route('/')
 def home():

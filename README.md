@@ -11,13 +11,15 @@ A feature-rich Discord bot designed to track and announce Spotify listening acti
 - **Real-time Tracking**: Announces when a tracked user starts listening to Spotify or changes tracks via Discord presence events.
 - **Offline / API Tracking**: Links users' Spotify accounts via OAuth2 to poll the Spotify Web API every 15 seconds — tracking activity even when Discord is closed or set to invisible.
 - **Auto-Track**: Users can opt into automatic tracking so the bot starts a session whenever they open Spotify, with no manual commands needed.
+- **Listening Time Tracking**: Accurately tracks the actual duration users spend listening to tracks, providing weekly, monthly, and all-time statistics.
+- **Spotify Link Previews**: Automatically detects Spotify song links in messages and replies with an informative embed displaying song metadata and album art.
 - **Skip Detection**: Detects multiple rapid skips and sends a single summary message instead of spamming the channel.
 - **Ad Detection**: Detects the brief pause caused by a Spotify ad and sends a fun notification when music resumes.
 - **Persistent History**: Remembers the last 5 tracks and per-artist play counts for each user across sessions, stored in MongoDB Atlas (with local JSON fallback).
 - **Top Artists Stats**: Shows a ranked leaderboard of the most listened-to artists recorded during tracking sessions.
 - **Colour-Matched Embeds**: Embeds use the dominant colour extracted from the album art.
 - **Hybrid Commands**: Seamlessly supports both prefix (`%`) and slash commands.
-- **Keep-Alive Server**: Includes a lightweight Flask server to keep the bot active on hosting platforms like Render.
+- **Interactive Web Dashboard**: Includes a Flask server for 24/7 hosting that features a dark-mode dashboard showing real-time bot health, user statistics, and handles the OAuth2 flow.
 
 ## Project Structure
 
@@ -25,13 +27,18 @@ A feature-rich Discord bot designed to track and announce Spotify listening acti
 spotifydiscordbot/
 ├── bot.py              # Entry point — loads cogs, syncs slash commands, starts keep-alive
 ├── database.py         # Shared state, MongoDB Atlas integration, JSON fallback
-├── keep_alive.py       # Flask server for uptime + Spotify OAuth2 callback (/login, /callback)
+├── keep_alive.py       # Flask server for web dashboard + Spotify OAuth2 callback (/login, /callback)
 ├── utils.py            # Shared helpers: embed builder, colour extractor, channel resolver
 ├── requirements.txt
+├── static/
+│   ├── favicon.png     # Website favicon
+│   └── style.css       # Styling for the web dashboard
+├── templates/
+│   └── index.html      # HTML template for the web dashboard
 └── cogs/
     ├── tracking.py     # Core tracking logic, presence listeners, trackme/stoptrack/autotrack commands
     ├── spotify_api.py  # Spotify Web API polling loop, link/unlink commands
-    ├── stats.py        # history, topartists, song commands
+    ├── stats.py        # history, topartists, song, minutes commands
     └── general.py      # ping, cleanse commands
 ```
 
@@ -90,34 +97,35 @@ The default prefix is `%`. All commands are also available as slash commands.
 
 ### Tracking
 
-| Command               | Description                                                                                    |
-| :-------------------- | :--------------------------------------------------------------------------------------------- |
-| `%trackme <minutes>`  | Starts tracking your Spotify activity for the specified duration.                              |
-| `%stoptrack`          | Manually stops tracking your Spotify activity.                                                 |
-| `%autotrack`          | Toggles auto-tracking. When enabled, the bot automatically starts a session when you play music on Spotify. Disabling it also removes you from the active tracklist. |
-| `%tracklist`          | Displays all users currently being tracked, along with their current song and time remaining.  |
+| Command              | Description                                                                                                                                                          |
+| :------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `%trackme <minutes>` | Starts tracking your Spotify activity for the specified duration.                                                                                                    |
+| `%stoptrack`         | Manually stops tracking your Spotify activity.                                                                                                                       |
+| `%autotrack`         | Toggles auto-tracking. When enabled, the bot automatically starts a session when you play music on Spotify. Disabling it also removes you from the active tracklist. |
+| `%tracklist`         | Displays all users currently being tracked, along with their current song and time remaining.                                                                        |
 
 ### Spotify Account Linking (for Offline Tracking)
 
-| Command    | Description                                                                                   |
-| :--------- | :-------------------------------------------------------------------------------------------- |
-| `%link`    | Links your Spotify account via OAuth2 to enable tracking even when Discord is closed/invisible. |
-| `%unlink`  | Revokes the Spotify link and removes your stored tokens.                                      |
+| Command   | Description                                                                                     |
+| :-------- | :---------------------------------------------------------------------------------------------- |
+| `%link`   | Links your Spotify account via OAuth2 to enable tracking even when Discord is closed/invisible. |
+| `%unlink` | Revokes the Spotify link and removes your stored tokens.                                        |
 
 ### Stats
 
-| Command                    | Description                                                          |
-| :------------------------- | :------------------------------------------------------------------- |
-| `%history`                 | Shows your last 5 recorded tracks from previous sessions.            |
-| `%topartists [member]`     | Shows the top 10 most listened-to artists for you or another member. |
-| `%song [member]`           | Shows what a user is currently listening to on Spotify.              |
+| Command                | Description                                                           |
+| :--------------------- | :-------------------------------------------------------------------- |
+| `%history`             | Shows your last 5 recorded tracks from previous sessions.             |
+| `%topartists [member]` | Shows the top 10 most listened-to artists for you or another member.  |
+| `%song [member]`       | Shows what a user is currently listening to on Spotify.               |
+| `%minutes [member]`    | Shows how many minutes of Spotify you have listened to while tracked. |
 
 ### General
 
-| Command    | Description                                                              |
-| :--------- | :----------------------------------------------------------------------- |
-| `%ping`    | Checks the bot's latency.                                                |
-| `%cleanse` | *(Admin only)* Deletes all of the bot's messages sent in the last hour.  |
+| Command    | Description                                                             |
+| :--------- | :---------------------------------------------------------------------- |
+| `%ping`    | Checks the bot's latency.                                               |
+| `%cleanse` | _(Admin only)_ Deletes all of the bot's messages sent in the last hour. |
 
 ## How Offline Tracking Works
 
@@ -134,15 +142,15 @@ All Spotify status announcements (song changes, skips, ads) are posted to a chan
 
 ## Dependencies
 
-| Package         | Purpose                                               |
-| :-------------- | :---------------------------------------------------- |
-| `discord.py`    | Core Discord library                                  |
-| `python-dotenv` | Loads environment variables from `.env`               |
-| `flask`         | Keep-alive server and OAuth2 callback endpoint        |
-| `requests`      | Synchronous HTTP for the OAuth2 token exchange        |
-| `aiohttp`       | Async HTTP for Spotify Web API polling                |
-| `motor`         | Async MongoDB driver                                  |
-| `dnspython`     | Required for MongoDB Atlas SRV connection strings     |
-| `colorthief`    | Extracts dominant colour from album art               |
-| `pillow`        | Image processing (used by colorthief)                 |
-| `prettytable`   | Table formatting for debug/admin endpoints            |
+| Package         | Purpose                                           |
+| :-------------- | :------------------------------------------------ |
+| `discord.py`    | Core Discord library                              |
+| `python-dotenv` | Loads environment variables from `.env`           |
+| `flask`         | Keep-alive server and OAuth2 callback endpoint    |
+| `requests`      | Synchronous HTTP for the OAuth2 token exchange    |
+| `aiohttp`       | Async HTTP for Spotify Web API polling            |
+| `motor`         | Async MongoDB driver                              |
+| `dnspython`     | Required for MongoDB Atlas SRV connection strings |
+| `colorthief`    | Extracts dominant colour from album art           |
+| `pillow`        | Image processing (used by colorthief)             |
+| `prettytable`   | Table formatting for debug/admin endpoints        |

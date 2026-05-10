@@ -30,11 +30,11 @@ def home():
         
         # Calculate global tracking stats
         total_seconds = sum([data.get("total", 0) for data in user_minutes_listened.values() if isinstance(data, dict)])
-        total_minutes = total_seconds // 60
+        total_minutes = total_seconds / 60
         total_songs = sum([len(history) for history in user_history.values()])
         
         # Format large numbers
-        total_minutes_str = f"{total_minutes:,}"
+        total_minutes_str = f"{total_minutes:,.1f}"
         total_songs_str = f"{total_songs:,}"
         
         bot_id = bot_instance.user.id

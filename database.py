@@ -13,6 +13,7 @@ DATA_FILE = "persistent_data.json"
 mongo_client = None
 db = None
 collection = None
+guild_collection = None
 
 # Shared state between files
 user_history = {}
@@ -21,12 +22,14 @@ user_settings = {}
 spotify_tokens = {} # {user_id: {access_token, refresh_token, expires_at}}
 tracked_users = {} # {user_id: {start_time, channel_id, user_name, duration, song_history, etc.}}
 user_minutes_listened = {}
+guild_settings = {} # {guild_id: {'prefix': '...'}}
 
 if MONGO_URI:
     try:
         mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
         db = mongo_client.spotify_bot
         collection = db.user_data
+        guild_collection = db.guild_data
         print(" >>> [SYSTEM]: Connected to MongoDB Atlas.")
     except Exception as e:
         print(f" >>> [DEBUG]: Failed to connect to MongoDB: {e}")
@@ -45,7 +48,8 @@ def save_json():
             "user_settings": {str(k): v for k, v in list(user_settings.items())},
             "spotify_tokens": {str(k): v for k, v in list(spotify_tokens.items())},
             "tracked_users": cleaned_tracked_users,
-            "user_minutes_listened": {str(k): v for k, v in list(user_minutes_listened.items())}
+            "user_minutes_listened": {str(k): v for k, v in list(user_minutes_listened.items())},
+            "guild_settings": {str(k): v for k, v in list(guild_settings.items())}
         }
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
@@ -74,9 +78,20 @@ async def save_persistent_data(user_id=None):
         except Exception as e:
             print(f" >>> [DEBUG]: Error saving to MongoDB: {e}")
 
+async def save_guild_data(guild_id):
+    """Saves guild specific settings (like prefix)"""
+    await asyncio.to_thread(save_json)
+    
+    if guild_collection is not None and guild_id:
+        try:
+            data = {"settings": guild_settings.get(guild_id, {})}
+            await guild_collection.update_one({"_id": str(guild_id)}, {"$set": data}, upsert=True)
+        except Exception as e:
+            print(f" >>> [DEBUG]: Error saving guild to MongoDB: {e}")
+
 async def load_persistent_data():
     """Loads user stats and settings from MongoDB (priority) or local JSON."""
-    global user_history, user_artist_counts, user_settings, spotify_tokens
+    global user_history, user_artist_counts, user_settings, spotify_tokens, guild_settings
     
     # 1. Try loading from MongoDB first
     if collection is not None:
@@ -96,7 +111,16 @@ async def load_persistent_data():
                     tracked_users[uid] = session
             
             if user_history or spotify_tokens:
-                print(f" >>> [SYSTEM]: Loaded persistent data from MongoDB.")
+                print(f" >>> [SYSTEM]: Loaded persistent user data from MongoDB.")
+                
+            if guild_collection is not None:
+                guild_cursor = guild_collection.find({})
+                async for doc in guild_cursor:
+                    gid = int(doc["_id"])
+                    guild_settings[gid] = doc.get("settings", {})
+                print(f" >>> [SYSTEM]: Loaded persistent guild data from MongoDB.")
+                
+            if user_history or spotify_tokens or guild_settings:
                 return # Successfully loaded from DB, skip JSON
         except Exception as e:
             print(f" >>> [DEBUG]: Error loading from MongoDB: {e}")
@@ -112,6 +136,7 @@ async def load_persistent_data():
                 spotify_tokens.update({int(k): v for k, v in data.get("spotify_tokens", {}).items()})
                 tracked_users.update({int(k): v for k, v in data.get("tracked_users", {}).items()})
                 user_minutes_listened.update({int(k): v for k, v in data.get("user_minutes_listened", {}).items()})
+                guild_settings.update({int(k): v for k, v in data.get("guild_settings", {}).items()})
                 print(f" >>> [SYSTEM]: Loaded backup data from local JSON.")
         except Exception as e:
             print(f" >>> [DEBUG]: Error loading backup JSON: {e}")

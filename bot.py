@@ -20,7 +20,13 @@ intents.message_content = True
 intents.presences = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="%", intents=intents)
+def get_prefix(bot, message):
+    from database import guild_settings
+    if not message.guild:
+        return "%"
+    return guild_settings.get(message.guild.id, {}).get("prefix", "%")
+
+bot = commands.Bot(command_prefix=get_prefix, intents=intents, help_command=None)
 
 @bot.event
 async def on_ready():

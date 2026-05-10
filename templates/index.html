@@ -48,8 +48,40 @@
       <span class="badge" style="background:rgba(255,92,92,.1);border-color:rgba(255,92,92,.35);color:#ff5c5c;">✗ {{ status_text }}</span>
 
     {% elif page == 'commands' %}
-      <p>Here is a list of all available commands for the bot.</p>
+      <p>Here is a list of all available commands for the bot. The bot has the prefix "%" by default. These commands can be run using both the legacy prefix and the new slash command system.</p>
       <div class="commands-list">
+        <div class="command-item">
+          <div class="command-name">/trackme</div>
+          <div class="command-desc">Begins to track your Spotify listening history for the specified amount of time.</div>
+        </div>
+        <div class="command-item">
+          <div class="command-name">/tracklist</div>
+          <div class="command-desc">Displays the list of users currently being tracked and how much time is remaining on their tracking session.</div>
+        </div>
+        <div class="command-item">
+          <div class="command-name">/stoptrack</div>
+          <div class="command-desc">Halts your current tracking session.</div>
+        </div>
+        <div class="command-item">
+          <div class="command-name">/autotrack</div>
+          <div class="command-desc">Enables/disables a feature that allows the bot to begin a tracking session as soon as you start listening.</div>
+        </div>
+        <div class="command-item">
+          <div class="command-name">/song</div>
+          <div class="command-desc">Displays the song that a user is currently listening to.</div>
+        </div>
+        <div class="command-item">
+          <div class="command-name">/history</div>
+          <div class="command-desc">Shows the last 5 songs you've listened to.</div>
+        </div>
+        <div class="command-item">
+          <div class="command-name">/minutes</div>
+          <div class="command-desc">Shows how many minutes you've listened to for the current week, this month, and all-time.</div>
+        </div>
+        <div class="command-item">
+          <div class="command-name">/topartists</div>
+          <div class="command-desc">Shows the top 10 artists a user has listened to.</div>
+        </div>
         <div class="command-item">
           <div class="command-name">/link</div>
           <div class="command-desc">Connect your Spotify account to the bot to start tracking your listening history.</div>
@@ -59,16 +91,12 @@
           <div class="command-desc">Disconnect your Spotify account and stop tracking.</div>
         </div>
         <div class="command-item">
-          <div class="command-name">/stats</div>
-          <div class="command-desc">View your recently played songs, top artists, and personal listening statistics.</div>
+          <div class="command-name">/ping</div>
+          <div class="command-desc">Displays the current latency of the bot, which is also shown on this website.</div>
         </div>
         <div class="command-item">
-          <div class="command-name">/minutes</div>
-          <div class="command-desc">See exactly how many minutes of music you've listened to this week, this month, and all-time.</div>
-        </div>
-        <div class="command-item">
-          <div class="command-name">/listen [user]</div>
-          <div class="command-desc">Track what a specific user is currently listening to, or start a tracking session.</div>
+          <div class="command-name">/cleanse</div>
+          <div class="command-desc">An admin-only command that deletes all messages sent by the bot within the last hour. (This command is largely redundant now, simply because the bot now sends all of its messages in its own channel if present).</div>
         </div>
       </div>
       <div class="action-buttons" style="margin-top: 16px;">

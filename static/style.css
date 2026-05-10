@@ -207,3 +207,214 @@ p {
   color: rgba(232,232,240,.7);
   line-height: 1.4;
 }
+
+/* ── Status Page ── */
+.status-page {
+  max-width: 700px;
+  text-align: left;
+  padding: 44px 48px;
+}
+.status-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 28px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 1rem;
+}
+.status-indicator.status-up {
+  background: rgba(30,215,96,.12);
+  border: 1px solid rgba(30,215,96,.3);
+  color: #1ed760;
+}
+.status-indicator.status-down {
+  background: rgba(255,92,92,.12);
+  border: 1px solid rgba(255,92,92,.3);
+  color: #ff5c5c;
+}
+.status-indicator.status-degraded {
+  background: rgba(255,193,7,.12);
+  border: 1px solid rgba(255,193,7,.3);
+  color: #ffc107;
+}
+.status-indicator.status-paused,
+.status-indicator.status-unknown {
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  color: rgba(232,232,240,.6);
+}
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: dot-pulse 2s ease-in-out infinite;
+}
+@keyframes dot-pulse {
+  0%,100% { opacity: 1; }
+  50% { opacity: .4; }
+}
+
+/* Monitor sections */
+.monitor-section {
+  background: rgba(255,255,255,.02);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 16px;
+}
+.monitor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.monitor-name {
+  font-weight: 700;
+  color: #e8e8f0;
+  font-size: .95rem;
+}
+.monitor-uptime {
+  font-weight: 800;
+  color: #1ed760;
+  font-size: .95rem;
+}
+
+/* Uptime bars */
+.uptime-bars {
+  display: flex;
+  gap: 2px;
+  height: 36px;
+  align-items: stretch;
+}
+.bar {
+  flex: 1;
+  border-radius: 3px;
+  min-width: 0;
+  transition: opacity .15s;
+  cursor: default;
+  position: relative;
+}
+.bar:hover { opacity: .65; }
+.bar-up { background: #1ed760; }
+.bar-degraded { background: #ffc107; }
+.bar-down { background: #ff5c5c; }
+.bar-nodata { background: rgba(255,255,255,.08); }
+.uptime-legend {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: .72rem;
+  font-weight: 600;
+  color: rgba(232,232,240,.35);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+/* Response time chart */
+.chart-container {
+  height: 80px;
+  background: rgba(255,255,255,.02);
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.04);
+}
+.chart-container svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.current-latency {
+  text-align: right;
+  font-size: .8rem;
+  color: rgba(232,232,240,.45);
+  margin-top: 8px;
+  font-weight: 600;
+}
+.current-latency strong { color: #1ed760; }
+
+/* Uptime stats row */
+.uptime-stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.uptime-stat {
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.05);
+  border-radius: 14px;
+  padding: 18px 12px;
+  text-align: center;
+}
+.uptime-stat-value {
+  font-size: 1.35rem;
+  font-weight: 900;
+  color: #1ed760;
+  margin-bottom: 4px;
+}
+.uptime-stat-label {
+  font-size: .7rem;
+  font-weight: 700;
+  color: rgba(232,232,240,.4);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+/* Recent events */
+.events-section {
+  background: rgba(255,255,255,.02);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 16px;
+}
+.events-title {
+  font-weight: 800;
+  font-size: .95rem;
+  margin-bottom: 16px;
+  color: #e8e8f0;
+}
+.event-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.event-item:last-child { border-bottom: none; }
+.event-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+.event-dot.event-down { background: #ff5c5c; }
+.event-dot.event-up { background: #1ed760; }
+.event-info { flex: 1; }
+.event-desc {
+  font-size: .9rem;
+  font-weight: 600;
+  color: rgba(232,232,240,.8);
+}
+.event-time {
+  font-size: .78rem;
+  font-weight: 600;
+  color: rgba(232,232,240,.35);
+  margin-top: 2px;
+}
+
+/* No-data fallback */
+.status-fallback-info {
+  text-align: center;
+  margin-top: 20px;
+}
+.status-fallback-info .stat-value {
+  font-size: 2.2rem;
+}

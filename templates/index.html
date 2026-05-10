@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
 </head>
 <body>
-  <div class="card {{ extra_class }}">
+  <div class="card {% if page == 'status' %}status-page{% endif %} {{ extra_class }}">
     <div class="icon">{{ icon }}</div>
     <h1>{{ heading }}</h1>
     
@@ -42,6 +42,7 @@
       <div class="action-buttons">
         <a href="{{ invite_link }}" target="_blank" class="btn">Invite Bot</a>
         <a href="/commands" class="btn btn-secondary">Commands</a>
+        <a href="/status" class="btn btn-secondary">Status</a>
       </div>
 
     {% elif page == 'home_offline' %}
@@ -101,6 +102,109 @@
         </div>
       </div>
       <div class="action-buttons" style="margin-top: 16px;">
+        <a href="/" class="btn btn-secondary">← Back to Dashboard</a>
+      </div>
+
+    {% elif page == 'status' %}
+      <!-- Overall Status Indicator -->
+      <div class="status-header">
+        <div class="status-indicator status-{{ overall_class }}">
+          <div class="status-dot"></div>
+          <span>{{ overall_text }}</span>
+        </div>
+      </div>
+
+      <!-- Uptime Bars -->
+      <div class="monitor-section">
+        <div class="monitor-header">
+          <span class="monitor-name">{{ monitor_name }}</span>
+          <span class="monitor-uptime">{{ uptime_7d }}%</span>
+        </div>
+        <div class="uptime-bars">
+          {% for bar in bars %}
+          <div class="bar bar-{{ bar.status }}" title="{{ bar.tooltip }}"></div>
+          {% endfor %}
+        </div>
+        <div class="uptime-legend">
+          <span>7 days ago</span>
+          <span>Today</span>
+        </div>
+      </div>
+
+      <!-- Response Time Chart -->
+      <div class="monitor-section">
+        <div class="monitor-header">
+          <span class="monitor-name">Response Time</span>
+          <span class="monitor-uptime">{{ avg_response }}ms avg</span>
+        </div>
+        <div class="chart-container">
+          <svg viewBox="0 0 500 100" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="rgba(30,215,96,0.25)"/>
+                <stop offset="100%" stop-color="rgba(30,215,96,0)"/>
+              </linearGradient>
+            </defs>
+            {% if chart_points %}
+            <polygon fill="url(#cg)" points="0,100 {{ chart_points }} 500,100"/>
+            <polyline fill="none" stroke="#1ed760" stroke-width="2" points="{{ chart_points }}" vector-effect="non-scaling-stroke"/>
+            {% endif %}
+          </svg>
+        </div>
+        {% if current_latency %}
+        <div class="current-latency">Current: <strong>{{ current_latency }}ms</strong></div>
+        {% endif %}
+      </div>
+
+      <!-- Uptime Percentages -->
+      <div class="uptime-stats-row">
+        <div class="uptime-stat">
+          <div class="uptime-stat-value">{{ uptime_24h }}%</div>
+          <div class="uptime-stat-label">24 Hours</div>
+        </div>
+        <div class="uptime-stat">
+          <div class="uptime-stat-value">{{ uptime_7d }}%</div>
+          <div class="uptime-stat-label">7 Days</div>
+        </div>
+        <div class="uptime-stat">
+          <div class="uptime-stat-value">{{ uptime_30d }}%</div>
+          <div class="uptime-stat-label">30 Days</div>
+        </div>
+      </div>
+
+      <!-- Recent Events -->
+      {% if events %}
+      <div class="events-section">
+        <div class="events-title">Recent Events</div>
+        {% for event in events %}
+        <div class="event-item">
+          <div class="event-dot event-{{ event.type }}"></div>
+          <div class="event-info">
+            <div class="event-desc">{{ event.description }}</div>
+            <div class="event-time">{{ event.time_ago }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="action-buttons" style="margin-top: 8px;">
+        <a href="/" class="btn btn-secondary">← Back to Dashboard</a>
+      </div>
+
+    {% elif page == 'status_fallback' %}
+      <p>UptimeRobot integration is not configured. Showing basic bot status.</p>
+      <div class="status-fallback-info">
+        {% if is_online %}
+          <span class="badge">✓ Bot is Online</span>
+          {% if latency_ms %}
+          <p style="margin-top: 16px;">Latency: <strong style="color:#1ed760;">{{ latency_ms }}ms</strong></p>
+          {% endif %}
+        {% else %}
+          <span class="badge" style="background:rgba(255,92,92,.1);border-color:rgba(255,92,92,.35);color:#ff5c5c;">✗ Bot is Offline</span>
+        {% endif %}
+      </div>
+      <div class="action-buttons" style="margin-top: 24px;">
         <a href="/" class="btn btn-secondary">← Back to Dashboard</a>
       </div>
 

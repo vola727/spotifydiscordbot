@@ -84,6 +84,168 @@ def commands_page():
         heading="Bot Commands"
     )
 
+# ---------- UptimeRobot Status Page ----------
+
+import datetime as _dt
+
+_status_cache = {"data": None, "fetched_at": 0}
+_CACHE_TTL = 300  # 5 minutes
+
+def _fetch_uptimerobot():
+    """Fetch and cache UptimeRobot monitor data."""
+    now = time.time()
+    if _status_cache["data"] and (now - _status_cache["fetched_at"]) < _CACHE_TTL:
+        return _status_cache["data"]
+
+    api_key = os.getenv("UPTIMEROBOT_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        resp = requests.post("https://api.uptimerobot.com/v2/getMonitors", data={
+            "api_key": api_key,
+            "format": "json",
+            "response_times": 1,
+            "response_times_limit": 100,
+            "logs": 1,
+            "logs_limit": 50,
+            "custom_uptime_ratios": "1-7-30"
+        }, timeout=10)
+        data = resp.json()
+        if data.get("stat") == "ok":
+            _status_cache["data"] = data
+            _status_cache["fetched_at"] = now
+            return data
+    except Exception as e:
+        print(f" >>> [DEBUG]: Error fetching UptimeRobot data: {e}")
+
+    return _status_cache.get("data")  # return stale cache on error
+
+
+def _compute_bars(logs, num_bars=90):
+    """Build uptime bar data from UptimeRobot downtime logs (last 7 days)."""
+    now = time.time()
+    span = 7 * 24 * 3600
+    start = now - span
+    seg = span / num_bars
+
+    downtimes = []
+    for log in logs:
+        if log.get("type") == 1:  # type 1 = down
+            ds = log["datetime"]
+            de = ds + log.get("duration", 0)
+            downtimes.append((ds, de))
+
+    bars = []
+    for i in range(num_bars):
+        s = start + i * seg
+        e = s + seg
+        down = sum(max(0, min(e, de) - max(s, ds)) for ds, de in downtimes)
+        ratio = 1 - (down / seg) if seg else 1
+
+        if ratio >= 0.999:
+            status = "up"
+        elif ratio > 0:
+            status = "degraded"
+        else:
+            status = "down"
+
+        dt_label = _dt.datetime.fromtimestamp(s, tz=_dt.timezone.utc).strftime("%b %d, %H:%M UTC")
+        tooltip = dt_label if status == "up" else f"{dt_label} — {int(down/60)}m downtime"
+        bars.append({"status": status, "tooltip": tooltip})
+
+    return bars
+
+
+def _compute_chart(response_times):
+    """Convert response times list into SVG polyline points and avg value."""
+    if not response_times:
+        return "", 0
+    rts = [r for r in reversed(response_times[:80]) if r.get("value", 0) > 0]
+    if not rts:
+        return "", 0
+    vals = [r["value"] for r in rts]
+    mx = max(vals) * 1.2 or 1
+    avg = int(sum(vals) / len(vals))
+    pts = []
+    for i, r in enumerate(rts):
+        x = (i / max(len(rts) - 1, 1)) * 500
+        y = 100 - ((r["value"] / mx) * 80 + 5)
+        pts.append(f"{x:.1f},{y:.1f}")
+    return " ".join(pts), avg
+
+
+def _format_events(logs):
+    """Turn raw UptimeRobot logs into human-readable event dicts."""
+    now = time.time()
+    events = []
+    for log in logs[:10]:
+        lt = log.get("type")
+        ts = log.get("datetime", 0)
+        dur = log.get("duration", 0)
+        diff = now - ts
+        if diff < 3600:
+            ago = f"{int(diff/60)}m ago"
+        elif diff < 86400:
+            ago = f"{int(diff/3600)}h ago"
+        else:
+            ago = f"{int(diff/86400)}d ago"
+
+        if lt == 1:
+            d = f"{int(dur/60)}m" if dur < 3600 else f"{dur/3600:.1f}h"
+            events.append({"type": "down", "description": f"Downtime detected — lasted {d}", "time_ago": ago})
+        elif lt == 2:
+            events.append({"type": "up", "description": "Service recovered — back online", "time_ago": ago})
+        elif lt == 98:
+            events.append({"type": "up", "description": "Monitoring started", "time_ago": ago})
+    return events
+
+
+@app.route('/status')
+def status_page():
+    data = _fetch_uptimerobot()
+
+    if not data or not data.get("monitors"):
+        is_online = bot_instance and bot_instance.is_ready() and not bot_instance.is_closed()
+        return render_template('index.html',
+            page='status_fallback',
+            title="Status • Spotify Bot",
+            icon="📊",
+            heading="System Status",
+            is_online=is_online,
+            latency_ms=int(bot_instance.latency * 1000) if is_online else None
+        )
+
+    mon = data["monitors"][0]
+    status_map = {0: ("Paused", "paused"), 1: ("Pending", "unknown"),
+                  2: ("Operational", "up"), 8: ("Degraded", "degraded"), 9: ("Down", "down")}
+    overall_text, overall_class = status_map.get(mon.get("status"), ("Unknown", "unknown"))
+
+    ratios = mon.get("custom_uptime_ratio", "0-0-0").split("-")
+    bars = _compute_bars(mon.get("logs", []))
+    chart_points, avg_response = _compute_chart(mon.get("response_times", []))
+    events = _format_events(mon.get("logs", []))
+
+    current_lat = int(bot_instance.latency * 1000) if (bot_instance and bot_instance.is_ready()) else None
+
+    return render_template('index.html',
+        page='status',
+        title="Status • Spotify Bot",
+        icon="📊",
+        heading="System Status",
+        overall_text=overall_text,
+        overall_class=overall_class,
+        monitor_name=mon.get("friendly_name", "Bot Monitor"),
+        uptime_24h=ratios[0] if len(ratios) > 0 else "0",
+        uptime_7d=ratios[1] if len(ratios) > 1 else "0",
+        uptime_30d=ratios[2] if len(ratios) > 2 else "0",
+        bars=bars,
+        chart_points=chart_points,
+        avg_response=avg_response,
+        events=events,
+        current_latency=current_lat
+    )
+
 @app.route('/login')
 def login():
     user_id = request.args.get('user_id')

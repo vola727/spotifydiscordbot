@@ -1,200 +1,78 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template
 from threading import Thread
 import os
 import requests
 import urllib.parse
-from database import spotify_tokens, save_persistent_data
+from database import spotify_tokens, save_persistent_data, user_history, user_minutes_listened
 import asyncio
 import time
 
-app = Flask('')
+app = Flask(__name__)
 
 bot_loop = None
+bot_instance = None
 
 def set_bot_loop(loop):
     global bot_loop
     bot_loop = loop
 
-# ---------- Shared CSS/HTML helpers ----------
-
-BASE_STYLE = """
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: 'Inter', sans-serif;
-    background: #0a0a0f;
-    color: #e8e8f0;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-  }
-  /* animated mesh background */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background:
-      radial-gradient(ellipse 80% 60% at 20% 10%, rgba(30,215,96,.18) 0%, transparent 60%),
-      radial-gradient(ellipse 60% 80% at 80% 80%, rgba(30,215,96,.10) 0%, transparent 60%),
-      radial-gradient(ellipse 50% 50% at 50% 50%, rgba(10,10,15,1) 100%, transparent);
-    z-index: -1;
-    animation: pulse 8s ease-in-out infinite alternate;
-  }
-  @keyframes pulse {
-    from { opacity: .7; }
-    to   { opacity: 1; }
-  }
-  .card {
-    background: rgba(255,255,255,.04);
-    border: 1px solid rgba(255,255,255,.08);
-    backdrop-filter: blur(20px);
-    border-radius: 24px;
-    padding: 52px 56px;
-    max-width: 520px;
-    width: 92%;
-    text-align: center;
-    box-shadow: 0 8px 48px rgba(0,0,0,.5);
-    animation: rise .6s cubic-bezier(.22,1,.36,1) both;
-  }
-  @keyframes rise {
-    from { opacity:0; transform: translateY(28px); }
-    to   { opacity:1; transform: translateY(0); }
-  }
-  .icon { font-size: 3.5rem; margin-bottom: 20px; }
-  h1 {
-    font-size: 2rem;
-    font-weight: 900;
-    letter-spacing: -.03em;
-    margin-bottom: 12px;
-    background: linear-gradient(135deg, #1ed760, #17a349);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-  p {
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: rgba(232,232,240,.65);
-    line-height: 1.6;
-  }
-  .badge {
-    display: inline-block;
-    margin-top: 28px;
-    padding: 8px 22px;
-    border-radius: 999px;
-    background: rgba(30,215,96,.15);
-    border: 1px solid rgba(30,215,96,.35);
-    font-size: .85rem;
-    font-weight: 700;
-    color: #1ed760;
-    letter-spacing: .04em;
-    text-transform: uppercase;
-  }
-  .btn {
-    display: inline-block;
-    margin-top: 28px;
-    padding: 13px 36px;
-    border-radius: 999px;
-    background: linear-gradient(135deg, #1ed760, #17a349);
-    color: #000;
-    font-weight: 800;
-    font-size: 1rem;
-    text-decoration: none;
-    transition: transform .18s, box-shadow .18s;
-    box-shadow: 0 4px 24px rgba(30,215,96,.35);
-  }
-  .btn:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(30,215,96,.5); }
-  .error-icon { font-size: 3.5rem; margin-bottom: 20px; }
-  .error h1 {
-    background: linear-gradient(135deg, #ff5c5c, #c0392b);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-  .error .badge {
-    background: rgba(255,92,92,.1);
-    border-color: rgba(255,92,92,.35);
-    color: #ff5c5c;
-  }
-  .footer-container {
-    position: fixed;
-    bottom: 24px;
-    width: 100%;
-    display: flex;
-    justify-content: center;
-    z-index: 10;
-  }
-  .footer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    text-decoration: none;
-    color: rgba(232, 232, 240, 0.6);
-    font-size: 0.9rem;
-    font-weight: 600;
-    transition: all 0.2s ease;
-    padding: 10px 20px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(10px);
-  }
-  .footer:hover {
-    color: #1ed760;
-    background: rgba(30, 215, 96, 0.1);
-    border-color: rgba(30, 215, 96, 0.3);
-    transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(30, 215, 96, 0.2);
-  }
-  .footer svg {
-    fill: currentColor;
-    width: 20px;
-    height: 20px;
-  }
-"""
-
-def _page(title, icon, heading, body_html, extra_class=""):
-    return render_template_string(f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>{title}</title>
-      <style>{BASE_STYLE}</style>
-    </head>
-    <body>
-      <div class="card {extra_class}">
-        <div class="icon">{icon}</div>
-        <h1>{heading}</h1>
-        {body_html}
-      </div>
-      <div class="footer-container">
-        <a href="https://github.com/vola727/spotifydiscordbot" target="_blank" rel="noopener noreferrer" class="footer">
-          <svg viewBox="0 0 24 24">
-            <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-          </svg>
-          Source Code
-        </a>
-      </div>
-    </body>
-    </html>
-    """)
-
-# ---------- Routes ----------
+def set_bot(b):
+    global bot_instance
+    bot_instance = b
 
 @app.route('/')
 def home():
-    return _page(
-        title="Spotify Bot • Online",
-        icon="🎵",
-        heading="Bot is Online",
-        body_html="""
-          <p>Your Spotify Discord bot is running smoothly and ready to track music.</p>
-          <span class="badge">✓ All systems operational</span>
-        """
+    if bot_instance and bot_instance.is_ready() and not bot_instance.is_closed():
+        # Calculate stats
+        latency_ms = int(bot_instance.latency * 1000)
+        guild_count = len(bot_instance.guilds)
+        registered_users = len(spotify_tokens)
+        
+        # Calculate global tracking stats
+        total_seconds = sum([data.get("total", 0) for data in user_minutes_listened.values() if isinstance(data, dict)])
+        total_minutes = total_seconds // 60
+        total_songs = sum([len(history) for history in user_history.values()])
+        
+        # Format large numbers
+        total_minutes_str = f"{total_minutes:,}"
+        total_songs_str = f"{total_songs:,}"
+        
+        bot_id = bot_instance.user.id
+        invite_link = f"https://discord.com/oauth2/authorize?client_id={bot_id}&permissions=2252076839595072&integration_type=0&scope=bot"
+        
+        return render_template('index.html',
+            page='home_online',
+            title="Spotify Bot • Dashboard",
+            icon="🎵",
+            heading="Bot is Online",
+            latency_ms=latency_ms,
+            guild_count=guild_count,
+            registered_users=registered_users,
+            total_minutes=total_minutes_str,
+            total_songs=total_songs_str,
+            invite_link=invite_link
+        )
+    else:
+        status_text = "Bot Offline" if (bot_instance and bot_instance.is_closed()) else "Bot Starting"
+        if not bot_instance:
+            status_text = "Bot Offline"
+            
+        return render_template('index.html',
+            page='home_offline',
+            title=f"Spotify Bot • {status_text}",
+            icon="⚠️",
+            heading=status_text,
+            status_text=status_text,
+            extra_class="error"
+        ), 503
+
+@app.route('/commands')
+def commands_page():
+    return render_template('index.html',
+        page='commands',
+        title="Spotify Bot • Commands",
+        icon="⌨️",
+        heading="Bot Commands"
     )
 
 @app.route('/login')
@@ -215,15 +93,14 @@ def login():
         'state': user_id
     }
     url = 'https://accounts.spotify.com/authorize?' + urllib.parse.urlencode(params)
-    return _page(
+    return render_template('index.html',
+        page='message',
         title="Connecting to Spotify…",
         icon="🔗",
         heading="Connecting to Spotify",
-        body_html=f'''
-          <p>Redirecting you to Spotify's login page to authorize your account…</p>
-          <span class="badge">⏳ Redirecting</span>
-          <script>setTimeout(()=>window.location.href="{url}", 800);</script>
-        '''
+        body_html="<p>Redirecting you to Spotify's login page to authorize your account…</p>",
+        badge_text="⏳ Redirecting",
+        script=f'setTimeout(()=>window.location.href="{url}", 800);'
     )
 
 @app.route('/callback')
@@ -233,20 +110,20 @@ def callback():
     error = request.args.get('error')
     
     if error:
-        return _page(
+        return render_template('index.html',
+            page='message',
             title="Linking Failed • Spotify Bot",
             icon="❌",
             heading="Linking Failed",
-            body_html=f"""
-              <p>Spotify returned an error while linking your account:</p>
-              <span class="badge" style="margin-top:16px;background:rgba(255,92,92,.1);border-color:rgba(255,92,92,.35);color:#ff5c5c;">{error}</span>
-              <br><p style="margin-top:20px;">Please try the <code>/link</code> command in Discord again.</p>
-            """,
+            body_html="<p>Spotify returned an error while linking your account:</p><br><p style='margin-top:20px;'>Please try the <code>/link</code> command in Discord again.</p>",
+            badge_text=error,
+            badge_style="margin-top:16px;background:rgba(255,92,92,.1);border-color:rgba(255,92,92,.35);color:#ff5c5c;",
             extra_class="error"
         ), 400
         
     if not code or not user_id:
-        return _page(
+        return render_template('index.html',
+            page='message',
             title="Bad Request • Spotify Bot",
             icon="⚠️",
             heading="Invalid Request",
@@ -257,7 +134,8 @@ def callback():
     try:
         user_id = int(user_id)
     except ValueError:
-        return _page(
+        return render_template('index.html',
+            page='message',
             title="Bad Request • Spotify Bot",
             icon="⚠️",
             heading="Invalid State",
@@ -289,27 +167,27 @@ def callback():
         if bot_loop:
             asyncio.run_coroutine_threadsafe(save_persistent_data(user_id), bot_loop)
             
-        return _page(
+        return render_template('index.html',
+            page='message',
             title="Account Linked • Spotify Bot",
             icon="🎉",
             heading="Account Linked!",
             body_html="""
               <p>Your Spotify account has been successfully connected to the Discord bot.</p>
               <p style="margin-top:12px;">You can now close this window and return to Discord.</p>
-              <span class="badge">✓ Spotify Connected</span>
-            """
+            """,
+            badge_text="✓ Spotify Connected"
         )
     else:
         err_desc = auth_data.get('error_description', 'Unknown error')
-        return _page(
+        return render_template('index.html',
+            page='message',
             title="Linking Failed • Spotify Bot",
             icon="❌",
             heading="Linking Failed",
-            body_html=f"""
-              <p>Could not obtain an access token from Spotify.</p>
-              <span class="badge" style="margin-top:16px;background:rgba(255,92,92,.1);border-color:rgba(255,92,92,.35);color:#ff5c5c;">{err_desc}</span>
-              <br><p style="margin-top:20px;">Please try the <code>/link</code> command in Discord again.</p>
-            """,
+            body_html="<p>Could not obtain an access token from Spotify.</p><br><p style='margin-top:20px;'>Please try the <code>/link</code> command in Discord again.</p>",
+            badge_text=err_desc,
+            badge_style="margin-top:16px;background:rgba(255,92,92,.1);border-color:rgba(255,92,92,.35);color:#ff5c5c;",
             extra_class="error"
         ), 400
 
@@ -319,4 +197,3 @@ def run():
 def keep_alive():
     t = Thread(target=run)
     t.start()
-

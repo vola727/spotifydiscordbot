@@ -48,6 +48,7 @@ async def load_extensions():
 async def main():
     async with bot:
         await load_extensions()
+        keep_alive.set_bot(bot)
         keep_alive.set_bot_loop(asyncio.get_running_loop())
         keep_alive.keep_alive()
         await bot.start(TOKEN)

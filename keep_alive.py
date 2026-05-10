@@ -3,7 +3,8 @@ from threading import Thread
 import os
 import requests
 import urllib.parse
-from database import spotify_tokens, save_persistent_data, user_history, user_minutes_listened
+import database as _db
+from database import spotify_tokens, save_persistent_data, user_minutes_listened
 import asyncio
 import time
 
@@ -39,7 +40,7 @@ def home():
         # Calculate global tracking stats
         total_seconds = sum([data.get("total", 0) for data in user_minutes_listened.values() if isinstance(data, dict)])
         total_minutes = total_seconds / 60
-        total_songs = sum([len(history) for history in user_history.values()])
+        total_songs = _db.global_songs_tracked
         
         # Format large numbers
         total_minutes_str = f"{total_minutes:,.1f}"

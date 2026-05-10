@@ -23,6 +23,7 @@ spotify_tokens = {} # {user_id: {access_token, refresh_token, expires_at}}
 tracked_users = {} # {user_id: {start_time, channel_id, user_name, duration, song_history, etc.}}
 user_minutes_listened = {}
 guild_settings = {} # {guild_id: {'prefix': '...'}}
+global_songs_tracked = 0 # Ever-incrementing count of all unique songs logged
 
 if MONGO_URI:
     try:
@@ -49,7 +50,8 @@ def save_json():
             "spotify_tokens": {str(k): v for k, v in list(spotify_tokens.items())},
             "tracked_users": cleaned_tracked_users,
             "user_minutes_listened": {str(k): v for k, v in list(user_minutes_listened.items())},
-            "guild_settings": {str(k): v for k, v in list(guild_settings.items())}
+            "guild_settings": {str(k): v for k, v in list(guild_settings.items())},
+            "global_songs_tracked": global_songs_tracked
         }
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
@@ -78,6 +80,17 @@ async def save_persistent_data(user_id=None):
         except Exception as e:
             print(f" >>> [DEBUG]: Error saving to MongoDB: {e}")
 
+    # Save global meta (songs counter) to MongoDB
+    if guild_collection is not None:
+        try:
+            await guild_collection.update_one(
+                {"_id": "__meta__"},
+                {"$set": {"global_songs_tracked": global_songs_tracked}},
+                upsert=True
+            )
+        except Exception as e:
+            print(f" >>> [DEBUG]: Error saving meta to MongoDB: {e}")
+
 async def save_guild_data(guild_id):
     """Saves guild specific settings (like prefix)"""
     await asyncio.to_thread(save_json)
@@ -89,9 +102,14 @@ async def save_guild_data(guild_id):
         except Exception as e:
             print(f" >>> [DEBUG]: Error saving guild to MongoDB: {e}")
 
+async def increment_songs_tracked():
+    """Increments the global unique-song counter by one."""
+    global global_songs_tracked
+    global_songs_tracked += 1
+
 async def load_persistent_data():
     """Loads user stats and settings from MongoDB (priority) or local JSON."""
-    global user_history, user_artist_counts, user_settings, spotify_tokens, guild_settings
+    global user_history, user_artist_counts, user_settings, spotify_tokens, guild_settings, global_songs_tracked
     
     # 1. Try loading from MongoDB first
     if collection is not None:
@@ -116,6 +134,9 @@ async def load_persistent_data():
             if guild_collection is not None:
                 guild_cursor = guild_collection.find({})
                 async for doc in guild_cursor:
+                    if doc["_id"] == "__meta__":
+                        global_songs_tracked = doc.get("global_songs_tracked", 0)
+                        continue
                     gid = int(doc["_id"])
                     guild_settings[gid] = doc.get("settings", {})
                 print(f" >>> [SYSTEM]: Loaded persistent guild data from MongoDB.")
@@ -137,6 +158,7 @@ async def load_persistent_data():
                 tracked_users.update({int(k): v for k, v in data.get("tracked_users", {}).items()})
                 user_minutes_listened.update({int(k): v for k, v in data.get("user_minutes_listened", {}).items()})
                 guild_settings.update({int(k): v for k, v in data.get("guild_settings", {}).items()})
+                global_songs_tracked = data.get("global_songs_tracked", 0)
                 print(f" >>> [SYSTEM]: Loaded backup data from local JSON.")
         except Exception as e:
             print(f" >>> [DEBUG]: Error loading backup JSON: {e}")

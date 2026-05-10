@@ -7,7 +7,7 @@ import datetime
 from database import (
     tracked_users, user_history, user_artist_counts, 
     user_settings, save_persistent_data, update_artist_stats,
-    update_minutes_listened
+    update_minutes_listened, increment_songs_tracked
 )
 import re
 from utils import (
@@ -57,6 +57,7 @@ async def start_tracking_session(bot, member, channel, duration, ctx_guild=None,
         persist_history.insert(0, current_track)
         user_history[user_id] = persist_history[:5]
         await update_artist_stats(user_id, getattr(spotify, 'artists', []))
+    await increment_songs_tracked()
         
     return True, current_track
 
@@ -260,6 +261,7 @@ class Tracking(commands.Cog):
                         persist_history.insert(0, new_track)
                         user_history[user_id] = persist_history[:5]
                         await update_artist_stats(user_id, getattr(after_spotify, 'artists', []))
+                    await increment_songs_tracked()
 
                     if data.get('notif_task'):
                         data['notif_task'].cancel()

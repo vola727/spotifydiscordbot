@@ -5,7 +5,7 @@ import aiohttp
 import time
 import asyncio
 import traceback
-from database import spotify_tokens, tracked_users, user_settings, save_persistent_data, update_artist_stats, user_history, update_minutes_listened
+from database import spotify_tokens, tracked_users, user_settings, save_persistent_data, update_artist_stats, user_history, update_minutes_listened, increment_songs_tracked
 from utils import get_spotify_color, get_presence_channel
 
 class SpotifyAPI(commands.Cog):
@@ -270,6 +270,7 @@ class SpotifyAPI(commands.Cog):
                             persist_history.insert(0, new_track_str)
                             user_history[user_id] = persist_history[:5]
                             await update_artist_stats(user_id, artists)
+                        await increment_songs_tracked()
                         
                         channel_id = tracked_data['channel_id']
                         target_channel = await get_presence_channel(self.bot, None, channel_id) # API Polling fallback

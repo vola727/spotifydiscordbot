@@ -7,7 +7,8 @@ import datetime
 from database import (
     tracked_users, user_history, user_artist_counts, 
     user_settings, save_persistent_data, update_artist_stats,
-    update_minutes_listened, increment_songs_tracked
+    update_minutes_listened, increment_songs_tracked,
+    reset_all_minutes_listened
 )
 import re
 from utils import (
@@ -205,6 +206,8 @@ class Tracking(commands.Cog):
                         listened_secs = time.time() - data['current_song_start_time']
                         if before_spotify and hasattr(before_spotify, 'duration') and before_spotify.duration:
                             listened_secs = min(listened_secs, before_spotify.duration.total_seconds())
+                        else:
+                            listened_secs = min(listened_secs, 600)
                         if listened_secs > 10:
                             await update_minutes_listened(user_id, listened_secs)
                     del tracked_users[user_id]
@@ -215,6 +218,8 @@ class Tracking(commands.Cog):
                     listened_secs = time.time() - data['current_song_start_time']
                     if hasattr(before_spotify, 'duration') and before_spotify.duration:
                         listened_secs = min(listened_secs, before_spotify.duration.total_seconds())
+                    else:
+                        listened_secs = min(listened_secs, 600)
                     if listened_secs > 10:
                         await update_minutes_listened(user_id, listened_secs)
                     data['current_song_start_time'] = None
@@ -237,12 +242,14 @@ class Tracking(commands.Cog):
                     if not data.get('current_song_start_time'):
                         data['current_song_start_time'] = time.time()
 
-                track_id = getattr(after_spotify, 'track_id', after_spotify.title)
-                if track_id != data.get('last_notified_song'):
+                track_id = getattr(after_spotify, 'track_id', None) or getattr(after_spotify, 'title', None)
+                if track_id and track_id != data.get('last_notified_song'):
                     if data.get('current_song_start_time'):
                         listened_secs = time.time() - data['current_song_start_time']
                         if before_spotify and hasattr(before_spotify, 'duration') and before_spotify.duration:
                             listened_secs = min(listened_secs, before_spotify.duration.total_seconds())
+                        else:
+                            listened_secs = min(listened_secs, 600)
                         if listened_secs > 10:
                             await update_minutes_listened(user_id, listened_secs)
                     data['current_song_start_time'] = time.time()
@@ -353,8 +360,14 @@ class Tracking(commands.Cog):
             data = tracked_users[user_id]
             if data.get('current_song_start_time'):
                 listened_secs = time.time() - data['current_song_start_time']
+                member = ctx.guild.get_member(user_id) if ctx.guild else ctx.author
+                spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities) if member else None
+                if spotify and hasattr(spotify, 'duration') and spotify.duration:
+                    listened_secs = min(listened_secs, spotify.duration.total_seconds())
+                else:
+                    listened_secs = min(listened_secs, 600)
                 if listened_secs > 10:
-                    await update_minutes_listened(user_id, min(listened_secs, 900))
+                    await update_minutes_listened(user_id, listened_secs)
             del tracked_users[user_id]
             desc = f"⏹️ **Tracking stopped.** I'll no longer post Spotify updates for **{ctx.author.display_name}** in this channel."
             
@@ -420,14 +433,34 @@ class Tracking(commands.Cog):
                 data = tracked_users[user_id]
                 if data.get('current_song_start_time'):
                     listened_secs = time.time() - data['current_song_start_time']
+                    member = ctx.guild.get_member(user_id) if ctx.guild else ctx.author
+                    spotify = discord.utils.find(lambda a: isinstance(a, discord.Spotify) or a.name == 'Spotify', member.activities) if member else None
+                    if spotify and hasattr(spotify, 'duration') and spotify.duration:
+                        listened_secs = min(listened_secs, spotify.duration.total_seconds())
+                    else:
+                        listened_secs = min(listened_secs, 600)
                     if listened_secs > 10:
-                        await update_minutes_listened(user_id, min(listened_secs, 900))
+                        await update_minutes_listened(user_id, listened_secs)
                 del tracked_users[user_id]
             desc = f"❌ **Auto-tracking disabled.**"
             color = discord.Color.red()
 
         await save_persistent_data(user_id)
         await message.edit(embed=discord.Embed(description=desc, color=color), view=None)
+
+    @commands.hybrid_command(name="resetminutes", description="[Owner] Reset all minutes listened data")
+    async def resetminutes(self, ctx):
+        AUTHORIZED_USER_ID = 550994878486544384
+        if ctx.author.id != AUTHORIZED_USER_ID:
+            await ctx.send("❌ You are not authorized to use this command.", ephemeral=True)
+            return
+        await ctx.defer()
+        await reset_all_minutes_listened()
+        embed = discord.Embed(
+            description="🔄 **All minutes listened data has been reset.**",
+            color=discord.Color.orange()
+        )
+        await ctx.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(Tracking(bot))

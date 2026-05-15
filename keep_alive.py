@@ -122,10 +122,10 @@ def _fetch_uptimerobot():
     return _status_cache.get("data")  # return stale cache on error
 
 
-def _compute_bars(logs, num_bars=90):
-    """Build uptime bar data from UptimeRobot downtime logs (last 7 days)."""
+def _compute_bars(logs, num_bars=50):
+    """Build uptime bar data from UptimeRobot downtime logs (last 3 days)."""
     now = time.time()
-    span = 7 * 24 * 3600
+    span = 3 * 24 * 3600
     start = now - span
     seg = span / num_bars
 

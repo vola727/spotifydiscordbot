@@ -2,7 +2,7 @@
 
 # Spotify Presence Tracker Discord Bot
 
-![alt text](peak.png)
+![alt text](static/peak.png)
 
 A feature-rich Discord bot designed to track and announce Spotify listening activity in real-time — both through Discord presence and directly via the Spotify Web API. It supports both prefix and slash commands, features persistent data storage via MongoDB Atlas, a built-in OAuth2 flow for offline tracking, and a keep-alive server for 24/7 hosting on platforms like Render.
 

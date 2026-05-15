@@ -198,3 +198,20 @@ async def update_minutes_listened(user_id, seconds):
     
     # Save after updates
     await save_persistent_data(user_id)
+
+async def reset_all_minutes_listened():
+    """Resets minutes listened data for all users."""
+    user_minutes_listened.clear()
+    
+    if collection is not None:
+        try:
+            await collection.update_many(
+                {},
+                {"$set": {"minutes_listened": {"total": 0, "months": {}, "weeks": {}}}}
+            )
+            print(" >>> [SYSTEM]: Reset all minutes listened data in MongoDB.")
+        except Exception as e:
+            print(f" >>> [DEBUG]: Error resetting minutes in MongoDB: {e}")
+    
+    await asyncio.to_thread(save_json)
+    print(" >>> [SYSTEM]: Reset all minutes listened data.")

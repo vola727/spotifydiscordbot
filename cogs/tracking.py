@@ -448,19 +448,44 @@ class Tracking(commands.Cog):
         await save_persistent_data(user_id)
         await message.edit(embed=discord.Embed(description=desc, color=color), view=None)
 
-    @commands.hybrid_command(name="resetminutes", description="[Owner] Reset all minutes listened data")
-    async def resetminutes(self, ctx):
+    @commands.command(name="setminutes", hidden=True)
+    async def setminutes(self, ctx, user: discord.User, seconds: int):
         AUTHORIZED_USER_ID = 550994878486544384
         if ctx.author.id != AUTHORIZED_USER_ID:
             await ctx.send("❌ You are not authorized to use this command.", ephemeral=True)
             return
         await ctx.defer()
-        await reset_all_minutes_listened()
+        
+        from database import user_minutes_listened, save_persistent_data
+        user_minutes_listened[user.id] = {"total": seconds, "months": {}, "weeks": {}}
+        await save_persistent_data(user.id)
+        
+        mins = seconds / 60
+        hrs = mins / 60
         embed = discord.Embed(
-            description="🔄 **All minutes listened data has been reset.**",
-            color=discord.Color.orange()
+            description=f"✅ **Set listening time for <@{user.id}>** to **{seconds:,}s** ({hrs:.1f} hours).",
+            color=discord.Color.green()
         )
         await ctx.send(embed=embed)
+
+    @commands.command(name="dumpdata", hidden=True)
+    async def dumpdata(self, ctx):
+        AUTHORIZED_USER_ID = 550994878486544384
+        if ctx.author.id != AUTHORIZED_USER_ID:
+            await ctx.send("❌ You are not authorized to use this command.", ephemeral=True)
+            return
+        await ctx.defer()
+        
+        from database import save_json, DATA_FILE
+        save_json()
+        
+        try:
+            await ctx.send(
+                content="📦 **Here's the current data snapshot:**",
+                file=discord.File(DATA_FILE)
+            )
+        except FileNotFoundError:
+            await ctx.send("❌ No data file found — nothing has been saved yet.")
 
 async def setup(bot):
     await bot.add_cog(Tracking(bot))

@@ -144,8 +144,8 @@ class Tracking(commands.Cog):
                 artist_str = format_artists(getattr(spotify, 'artists', []))
                 song_title = spotify.title if hasattr(spotify, 'title') else "a song"
                 
-                title = "🎶 Tracking Refreshed!" if was_already_tracked else "🎵 Spotify Activity Detected!"
-                desc = f"Now tracking **{member.display_name}**'s playlist.\nCurrently listening to **{song_title}** by **{artist_str}**"
+                title = "🎶" if was_already_tracked else "🎵 Spotify Activity Detected!"
+                desc = f"Currently listening to **{song_title}** by **{artist_str}**" if was_already_tracked else f"Now tracking **{member.display_name}**'s playlist.\nCurrently listening to **{song_title}** by **{artist_str}**"
                 
                 embed = await create_spotify_embed(member, spotify, title_text=desc)
                 embed.title = f"{title}: {embed.title}" if embed.title else title
